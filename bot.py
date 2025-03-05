@@ -28,20 +28,29 @@ db = Database()
 # Message cache for DM conversations
 message_cache = {}
 
+# Store the current channel restriction in memory
+current_channel_id = COFFEE_CHANNEL_ID
+
 # Helper function to check if command is in the allowed channel
 async def check_channel(interaction: discord.Interaction):
-    if COFFEE_CHANNEL_ID is None:
+    global current_channel_id
+    
+    if current_channel_id is None:
         return True  # No restriction if channel ID is not set
     
-    if interaction.channel_id != COFFEE_CHANNEL_ID:
-        coffee_channel = interaction.guild.get_channel(COFFEE_CHANNEL_ID)
-        channel_mention = f"<#{COFFEE_CHANNEL_ID}>" if coffee_channel else "the designated channel"
+    if interaction.channel_id != current_channel_id:
+        coffee_channel = interaction.guild.get_channel(current_channel_id)
+        channel_mention = f"<#{current_channel_id}>" if coffee_channel else "the designated channel"
         await interaction.response.send_message(
             f"⚠️ This command can only be used in {channel_mention}.",
             ephemeral=True
         )
         return False
     return True
+
+# Helper function to check if user has admin permissions
+def is_admin(interaction: discord.Interaction):
+    return interaction.user.guild_permissions.administrator
 
 # Define view for coffee chat request buttons
 class CoffeeChatRequestView(discord.ui.View):
@@ -471,6 +480,14 @@ async def coffee_help(interaction: discord.Interaction):
         inline=False
     )
     
+    # Add admin command info if user is an admin
+    if is_admin(interaction):
+        embed.add_field(
+            name="/coffee_set_channel",
+            value="**Admin only:** Set which channel the coffee bot can be used in. Leave the channel blank to allow usage in all channels.",
+            inline=False
+        )
+    
     embed.add_field(
         name="How it works",
         value="When you request a coffee chat, others can accept your invitation. "
@@ -481,6 +498,33 @@ async def coffee_help(interaction: discord.Interaction):
     )
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="coffee_set_channel", description="Set which channel the coffee bot can be used in (Admin only)")
+async def coffee_set_channel(interaction: discord.Interaction, channel: discord.TextChannel = None):
+    # Check if user is an admin
+    if not is_admin(interaction):
+        await interaction.response.send_message(
+            "⚠️ Only server administrators can use this command.",
+            ephemeral=True
+        )
+        return
+    
+    global current_channel_id
+    
+    if channel is None:
+        # If no channel is specified, remove the restriction
+        current_channel_id = None
+        await interaction.response.send_message(
+            "☕ Channel restriction removed. The Coffee Chat bot can now be used in any channel.",
+            ephemeral=False
+        )
+    else:
+        # Set the restriction to the specified channel
+        current_channel_id = channel.id
+        await interaction.response.send_message(
+            f"☕ Coffee Chat bot is now restricted to {channel.mention}.",
+            ephemeral=False
+        )
 
 if __name__ == "__main__":
     # For Replit hosting
