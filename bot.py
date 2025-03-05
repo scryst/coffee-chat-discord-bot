@@ -11,6 +11,10 @@ from database import Database
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+# Channel restriction - set this to the channel ID where commands should work
+COFFEE_CHANNEL_ID = os.getenv('COFFEE_CHANNEL_ID')
+if COFFEE_CHANNEL_ID:
+    COFFEE_CHANNEL_ID = int(COFFEE_CHANNEL_ID)
 
 # Set up intents
 intents = discord.Intents.default()
@@ -23,6 +27,21 @@ db = Database()
 
 # Message cache for DM conversations
 message_cache = {}
+
+# Helper function to check if command is in the allowed channel
+async def check_channel(interaction: discord.Interaction):
+    if COFFEE_CHANNEL_ID is None:
+        return True  # No restriction if channel ID is not set
+    
+    if interaction.channel_id != COFFEE_CHANNEL_ID:
+        coffee_channel = interaction.guild.get_channel(COFFEE_CHANNEL_ID)
+        channel_mention = f"<#{COFFEE_CHANNEL_ID}>" if coffee_channel else "the designated channel"
+        await interaction.response.send_message(
+            f"⚠️ This command can only be used in {channel_mention}.",
+            ephemeral=True
+        )
+        return False
+    return True
 
 # Define view for coffee chat request buttons
 class CoffeeChatRequestView(discord.ui.View):
@@ -224,6 +243,10 @@ async def on_message(message):
 
 @bot.tree.command(name="coffee", description="Request a random coffee chat with someone")
 async def coffee_request(interaction: discord.Interaction):
+    # Check if command is used in the allowed channel
+    if not await check_channel(interaction):
+        return
+        
     # Register the user if they're not already in the database
     await db.register_user(interaction.user.id, str(interaction.user), interaction.guild.id)
     
@@ -281,6 +304,10 @@ async def coffee_request(interaction: discord.Interaction):
 
 @bot.tree.command(name="coffee_cancel", description="Cancel your pending coffee chat request")
 async def coffee_cancel(interaction: discord.Interaction):
+    # Check if command is used in the allowed channel
+    if not await check_channel(interaction):
+        return
+        
     # Check if user has a pending request
     if not await db.has_pending_request(interaction.user.id, interaction.guild.id):
         await interaction.response.send_message(
@@ -311,6 +338,10 @@ async def coffee_cancel(interaction: discord.Interaction):
 
 @bot.tree.command(name="coffee_end", description="End your active coffee chat")
 async def coffee_end(interaction: discord.Interaction):
+    # Check if command is used in the allowed channel
+    if not await check_channel(interaction):
+        return
+        
     # Check if user is in a call
     if not await db.is_in_call(interaction.user.id):
         await interaction.response.send_message(
@@ -357,6 +388,10 @@ async def coffee_end(interaction: discord.Interaction):
 
 @bot.tree.command(name="coffee_stats", description="View your coffee chat statistics")
 async def coffee_stats(interaction: discord.Interaction):
+    # Check if command is used in the allowed channel
+    if not await check_channel(interaction):
+        return
+        
     # Get user stats
     stats = await db.get_call_stats(interaction.user.id, interaction.guild.id)
     
@@ -402,6 +437,10 @@ async def coffee_stats(interaction: discord.Interaction):
 
 @bot.tree.command(name="coffee_help", description="Learn how to use the Coffee Chat bot")
 async def coffee_help(interaction: discord.Interaction):
+    # Check if command is used in the allowed channel
+    if not await check_channel(interaction):
+        return
+        
     embed = discord.Embed(
         title="☕ Coffee Chat Bot Help",
         description="Connect with your community through spontaneous coffee chats!",
