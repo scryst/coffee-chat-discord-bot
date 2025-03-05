@@ -88,7 +88,23 @@ This state management ensures users can only perform actions that make sense for
    # OAuth URL (generated with generate_oauth_url.py)
    DISCORD_OAUTH_URL=your_oauth_url_here
    ```
-4. Run the bot with `python bot.py`
+
+### Running on Windows
+
+For Windows users, a PowerShell script is included to make starting the bot easier:
+1. Run `create_shortcut.ps1` to create a desktop shortcut (one-time setup)
+2. Use the created shortcut "Start Coffee Chat Bot" or run `start_coffee_bot.ps1` directly
+
+### Environment Variables
+
+The bot uses the following environment variables:
+- `DISCORD_TOKEN` (required): Your Discord bot token
+- `DISCORD_CLIENT_ID`: Your Discord application client ID
+- `DISCORD_PUBLIC_KEY`: Your Discord application public key
+- `DISCORD_CLIENT_SECRET`: Your Discord application client secret
+- `DISCORD_OAUTH_URL`: The OAuth URL for inviting the bot (can be generated with `generate_oauth_url.py`)
+
+A sample `.env.sample` file is provided as a template. Copy this to `.env` and fill in your values.
 
 ## Database Schema
 
@@ -149,8 +165,9 @@ The bot uses SQLite with the following tables:
 2. **Coffee Commands (`cogs/coffee_commands.py`)**: Implements the /coffee command and all button interactions
 3. **Message Handler (`utils/message_handler.py`)**: Manages message relay and formatting
 4. **UI Components (`utils/ui.py`)**: Defines custom UI elements like buttons and views
-5. **Database Manager (`utils/database.py`)**: Handles all database operations
+5. **Database Manager (`database/database.py`)**: Handles all database operations
 6. **Error Handler (`cogs/error_handler.py`)**: Manages error handling and logging
+7. **Web Server (`web_server.py`)**: Provides a web interface for uptime monitoring and status
 
 ### Key Technical Features
 
@@ -161,14 +178,49 @@ The bot uses SQLite with the following tables:
 - **Error Recovery**: Graceful handling of edge cases and unexpected errors
 - **Cross-Server Communication**: Seamless interaction between users on different servers
 - **Asynchronous Processing**: Non-blocking operations for responsive user experience
+- **Production-Ready Web Server**: Uses Waitress WSGI server for reliable web service
 
-## Hosting on Replit
+## Hosting Options
+
+### Self-Hosting
+
+1. Ensure you have Python 3.8+ installed
+2. Install dependencies with `pip install -r requirements.txt`
+3. Configure your `.env` file with the required credentials
+4. Run the bot with `python bot.py`
+
+### Hosting on Replit
 
 1. Create a new Replit project
 2. Upload all files from this repository
 3. Add your Discord bot token as a secret named `DISCORD_TOKEN`
 4. Click Run to start the bot
 5. Set up UptimeRobot to ping the Replit URL to keep it running
+
+### Hosting on VPS/Dedicated Server
+
+1. Clone the repository to your server
+2. Install dependencies with `pip install -r requirements.txt`
+3. Configure your `.env` file
+4. Set up a systemd service or use a process manager like PM2 or Supervisor
+5. (Optional) Set up a reverse proxy with Nginx or Apache if you want to expose the web interface
+
+Example systemd service file (`coffee-bot.service`):
+```
+[Unit]
+Description=Coffee Chat Discord Bot
+After=network.target
+
+[Service]
+User=your_username
+WorkingDirectory=/path/to/coffee_bot
+ExecStart=/usr/bin/python3 /path/to/coffee_bot/bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ## Setup Your Own Bot
 
@@ -210,6 +262,7 @@ The bot requires the following permissions:
 - Input sanitization for all user-provided content
 - Rate limiting to prevent abuse
 - Secure database transactions
+- Production-ready WSGI server (Waitress) for web interface
 
 ## Future Enhancements
 
@@ -236,10 +289,17 @@ The bot requires the following permissions:
 2. **Database errors**
    - Check file permissions for the SQLite database
    - Ensure no other process is locking the database
+   - Verify the database schema is up to date
 
 3. **Message relay issues**
    - Verify the bot can send DMs to users
    - Check if users have DMs enabled
+   - Ensure the bot has the necessary permissions
+
+4. **Web server issues**
+   - Check if port 8080 is available and not blocked by a firewall
+   - Verify Waitress is installed correctly
+   - Check network configuration if hosting behind NAT
 
 ### Debugging
 
@@ -248,6 +308,14 @@ The bot uses Python's logging module with different log levels:
 - WARNING: Potential issues that don't affect functionality
 - ERROR: Problems that affect functionality
 - DEBUG: Detailed information for troubleshooting
+
+To enable more detailed logging, modify the logging level in `bot.py`:
+```python
+logging.basicConfig(
+    level=logging.DEBUG,  # Change from INFO to DEBUG
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+```
 
 ## Contributing
 
@@ -273,7 +341,8 @@ This project follows PEP 8 guidelines with the following exceptions:
 - discord.py 2.0 or higher
 - aiosqlite for database management
 - python-dotenv for environment variables
-- flask for web server
+- flask for web interface
+- waitress for production-ready web server
 - PyNaCl for interaction verification
 - requests for API calls
 
@@ -282,6 +351,38 @@ This project follows PEP 8 guidelines with the following exceptions:
 - `generate_oauth_url.py` - Script to generate OAuth2 URLs with the correct permissions
 - `interactions_endpoint.py` - Flask server for handling Discord interactions via HTTP
 - `docs/` - Directory containing HTML documentation, privacy policy, and terms of service
+- `web_server.py` - Production-ready web server for uptime monitoring
+- `start_coffee_bot.ps1` - PowerShell script for easy startup on Windows
+- `create_shortcut.ps1` - Script to create a desktop shortcut on Windows
+
+## Architecture
+
+```
+coffee_bot/
+├── bot.py                 # Main entry point
+├── web_server.py          # Web server for uptime monitoring
+├── requirements.txt       # Dependencies
+├── .env                   # Environment variables (create from .env.sample)
+├── .env.sample            # Sample environment variables
+├── cogs/                  # Discord.py cogs
+│   ├── __init__.py
+│   ├── coffee_commands.py # Main command implementation
+│   ├── error_handler.py   # Error handling
+│   └── message_handler_cog.py # Message relay cog
+├── database/              # Database management
+│   ├── __init__.py
+│   ├── database.py        # Core database functions
+│   └── schema.py          # Database schema
+├── utils/                 # Utility functions
+│   ├── __init__.py
+│   ├── message_handler.py # Message formatting and relay
+│   ├── ui.py              # UI components
+│   └── status_updater.py  # Bot status management
+└── docs/                  # Documentation
+    ├── privacy.html       # Privacy policy
+    ├── terms.html         # Terms of service
+    └── index.html         # Documentation home
+```
 
 ## License
 
@@ -292,3 +393,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Discord.py team for the excellent library
 - All contributors who have helped improve this bot
 - The Discord community for feedback and support
+- Waitress team for the production-ready WSGI server
