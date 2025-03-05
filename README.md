@@ -2,11 +2,16 @@
 
 A Discord bot that facilitates coffee chats between users across servers, allowing for networking and knowledge sharing.
 
+## Join Our Community
+
+Join our Discord community to get help, share feedback, and connect with other users:
+[Join the Discord server](https://discord.gg/KGE8BfruV4)
+
 ## Features
 
 - 🔄 Create coffee chat requests with topics and descriptions
 - 🌐 Cross-server functionality to connect with users from different servers
-- 👥 Simple accept interface with interactive buttons
+- 👥 Simple menu-based UI with interactive buttons
 - 💬 Private conversations through the bot's DMs
 - 📊 Comprehensive statistics and leaderboards
 - 🔔 Direct message notifications for participants
@@ -15,22 +20,29 @@ A Discord bot that facilitates coffee chats between users across servers, allowi
 
 ## Commands
 
-- `/coffee_help` - Shows help information for the bot
-- `/coffee_request` - Create a new coffee chat request with a topic and description
-- `/coffee_cancel` - Cancel your pending coffee chat request
-- `/coffee_list` - List all pending coffee chat requests (with option to view cross-server)
-- `/coffee_stats` - View your personal coffee chat statistics
-- `/coffee_leaderboard` - View the coffee chat leaderboard (server or global)
+The bot uses a single command with a menu-based UI:
+
+- `/coffee` - Opens the main menu with buttons for all functionality
+
+## Menu Options
+
+From the main menu, users can:
+- **Request Coffee Chat** - Create a new coffee chat request
+- **View Requests** - Browse and accept pending coffee chat requests
+- **My Stats** - View personal coffee chat statistics
+- **Leaderboard** - View the coffee chat leaderboard
+- **Cancel My Request** - Cancel your pending coffee chat request
 
 ## How It Works
 
-1. A user creates a coffee chat request using `/coffee_request` with a topic and description
-2. The request appears in the channel with an Accept button
-3. Other users can view available requests with `/coffee_list` (including cross-server requests)
-4. When another user accepts, both users are connected through the bot's DMs
-5. All messages sent to the bot are relayed to the other participant
-6. Either user can end the chat by clicking the "End Chat" button
-7. Statistics are tracked for each user and displayed on leaderboards
+1. A user opens the menu with `/coffee` and selects "Request Coffee Chat"
+2. They fill out a modal with topic and description
+3. The request appears in the channel with an Accept button
+4. Other users can view and accept requests through the menu
+5. When another user accepts, both users are connected through the bot's DMs
+6. All messages sent to the bot are relayed to the other participant
+7. Either user can end the chat by clicking the "End Chat" button
+8. Statistics are tracked for each user and displayed on leaderboards
 
 ## Setup
 
@@ -90,10 +102,6 @@ The bot requires the following permissions:
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Community
-
-Join our Discord community: [https://discord.gg/KGE8BfruV4](https://discord.gg/KGE8BfruV4)
 
 ## Requirements
 

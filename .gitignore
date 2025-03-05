@@ -1,3 +1,10 @@
+# Environment variables
+.env
+
+# Database
+*.db
+*.db-journal
+
 # Python
 __pycache__/
 *.py[cod]
@@ -20,14 +27,6 @@ var/
 .installed.cfg
 *.egg
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Environment variables
-.env
-
 # Virtual Environment
 venv/
 ENV/
@@ -40,7 +39,3 @@ ENV/
 
 # Logs
 *.log
-
-# OS specific
-.DS_Store
-Thumbs.db
