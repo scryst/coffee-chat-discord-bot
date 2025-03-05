@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coffee Chat Bot - Documentation</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f5f0;
+        }
+        h1, h2, h3 {
+            color: #6f4e37;
+        }
+        h1 {
+            border-bottom: 2px solid #d2b48c;
+            padding-bottom: 10px;
+            text-align: center;
+        }
+        .container {
+            background-color: #fff;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        a {
+            color: #8b5a2b;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .button {
+            display: inline-block;
+            background-color: #6f4e37;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin: 10px 5px;
+            text-align: center;
+            transition: background-color 0.3s;
+        }
+        .button:hover {
+            background-color: #8b5a2b;
+            text-decoration: none;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .feature-card {
+            background-color: #f9f5f0;
+            border-left: 4px solid #d2b48c;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #777;
+        }
+        .hero {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .hero h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .hero p {
+            font-size: 1.2em;
+            color: #666;
+        }
+        .cta-buttons {
+            text-align: center;
+            margin: 30px 0;
+        }
+        code {
+            background-color: #f5f5f5;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: 'Courier New', Courier, monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="hero">
+            <h1>☕ Coffee Chat Bot</h1>
+            <p>Connect, network, and share knowledge across Discord servers</p>
+        </div>
+        
+        <div class="cta-buttons">
+            <a href="https://discord.com/api/oauth2/authorize?client_id=1346747859189633074&permissions=2147601408&scope=bot%20applications.commands" class="button">Add to Discord</a>
+            <a href="https://discord.gg/KGE8BfruV4" class="button">Join Support Server</a>
+            <a href="privacy.html" class="button">Privacy Policy</a>
+            <a href="terms.html" class="button">Terms of Service</a>
+        </div>
+        
+        <h2>About Coffee Chat Bot</h2>
+        <p>Coffee Chat Bot facilitates networking and knowledge sharing by connecting users across different Discord servers for one-on-one conversations. Whether you're looking to expand your professional network, share expertise, or just meet new people with similar interests, our bot makes it easy and engaging.</p>
+        
+        <h2>Key Features</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <h3>🌐 Cross-Server Networking</h3>
+                <p>Connect with users from any server where the bot is present</p>
+            </div>
+            <div class="feature-card">
+                <h3>🔄 Simple Request System</h3>
+                <p>Create and browse coffee chat requests with topics and descriptions</p>
+            </div>
+            <div class="feature-card">
+                <h3>👥 Interactive UI</h3>
+                <p>User-friendly menu-based interface with buttons for all functionality</p>
+            </div>
+            <div class="feature-card">
+                <h3>💬 Private Conversations</h3>
+                <p>Chat privately through the bot's DMs with full message relay</p>
+            </div>
+            <div class="feature-card">
+                <h3>📊 Statistics Tracking</h3>
+                <p>Track your coffee chat history and view leaderboards</p>
+            </div>
+            <div class="feature-card">
+                <h3>📁 File Sharing</h3>
+                <p>Share files and images during your coffee chats</p>
+            </div>
+        </div>
+        
+        <h2>Getting Started</h2>
+        <ol>
+            <li>Add the bot to your server using the "Add to Discord" button above</li>
+            <li>Use the <code>/coffee</code> command to open the main menu</li>
+            <li>Select "Request Coffee Chat" to create your first request</li>
+            <li>Fill out the topic and description for what you'd like to discuss</li>
+            <li>Wait for someone to accept your request, or browse existing requests to accept one</li>
+            <li>When connected, chat through the bot's DMs</li>
+            <li>End the chat when finished using the "End Chat" button</li>
+        </ol>
+        
+        <h2>Commands</h2>
+        <p>The bot uses a single slash command with a menu-based UI:</p>
+        <ul>
+            <li><code>/coffee</code> - Opens the main menu with buttons for all functionality</li>
+        </ul>
+        
+        <h2>For Server Owners</h2>
+        <p>Coffee Chat Bot requires the following permissions:</p>
+        <ul>
+            <li>Read Messages/View Channels</li>
+            <li>Send Messages</li>
+            <li>Embed Links</li>
+            <li>Attach Files</li>
+            <li>Use Slash Commands</li>
+            <li>Read Message History</li>
+        </ul>
+        <p>The bot also requires the "Message Content" and "Server Members" intents to function properly.</p>
+        
+        <h2>Support and Feedback</h2>
+        <p>Join our <a href="https://discord.gg/KGE8BfruV4">Discord server</a> for support, to report bugs, or to suggest new features. We're constantly improving the bot based on user feedback!</p>
+    </div>
+    
+    <div class="footer">
+        <p>&copy; 2025 Coffee Chat Bot. All rights reserved.</p>
+        <p><a href="privacy.html">Privacy Policy</a> | <a href="terms.html">Terms of Service</a></p>
+    </div>
+</body>
+</html>
