@@ -1,6 +1,6 @@
 # ☕ Coffee Chat Discord Bot
 
-A Discord bot that facilitates coffee chats between users across servers, allowing for networking and knowledge sharing.
+A Discord bot that facilitates professional networking through structured, bot-mediated coffee chat interactions across servers, allowing for networking and knowledge sharing.
 
 ## Join Our Community
 
@@ -11,15 +11,19 @@ Join our Discord community to get help, share feedback, and connect with other u
 
 - 🔄 Create coffee chat requests with topics and descriptions
 - 🌐 Cross-server functionality to connect with users from different servers
-- 👥 Simple menu-based UI with interactive buttons
+- 👥 Simple menu-based UI with interactive buttons that adapt to user's current state
 - 💬 Private conversations through the bot's DMs
-- 📊 Basic statistics tracking for users
+- 📊 Comprehensive statistics tracking for users
 - 🔔 Direct message notifications for participants
 - ⏱️ Duration tracking for coffee chats
 - 📁 Support for file and image sharing during chats
 - 👤 Display of both username and display name for better identification
-- 🎨 Stylized messages and embeds for improved user experience
+- 🎨 Stylized messages and embeds with consistent color schemes for different chat states
 - 🔄 Dynamic UI updates with in-place message editing
+- 🔒 Robust state management to prevent conflicting actions
+- 🕒 Consistent timestamp formatting across all chat stages
+- 🚫 Automatic cancellation of pending requests when accepting another request
+- 🔄 Smart button visibility based on user's current state
 
 ## Commands
 
@@ -35,6 +39,7 @@ From the main menu, users can:
 - **My Stats** - View personal coffee chat statistics
 - **Leaderboard** - View the coffee chat leaderboard
 - **Cancel My Request** - Cancel your pending coffee chat request
+- **End Current Chat** - End your active coffee chat (only shown when in an active chat)
 
 ## How It Works
 
@@ -47,27 +52,115 @@ From the main menu, users can:
 7. Either user can end the chat by clicking the "End Chat" button
 8. After ending a chat, users receive a stylized summary with chat duration
 9. Statistics are tracked for each user and displayed on leaderboards
+10. "Coffee Chat In Progress" messages automatically update to "Coffee Chat Completed" after the chat ends
+11. Chat status updates appear in both the server where the request was made and the server/DM where it was accepted
+12. Accepting a cross-server request automatically cancels your current request if you have one
+13. Users cannot create multiple requests or join chats while in an active chat
+14. The UI dynamically adapts to show only relevant options based on the user's current state
+
+## User State Management
+
+The bot implements sophisticated state management to track:
+- If a user is in an active chat
+- If a user has a pending request
+- If a user has no active interactions
+
+This state management ensures users can only perform actions that make sense for their current state:
+- Users in active chats see "End Current Chat" instead of "Request Coffee Chat"
+- Users cannot create multiple requests
+- Users cannot accept requests while in an active chat
+- Users cannot cancel requests while in an active chat
 
 ## Setup
 
 1. Clone this repository
 2. Install dependencies with `pip install -r requirements.txt`
-3. Create a `.env` file with your Discord bot token:
+3. Create a `.env` file with your Discord bot token and other credentials:
    ```
+   # Required
    DISCORD_TOKEN=your_discord_bot_token_here
+   
+   # Optional but recommended
+   DISCORD_CLIENT_ID=your_client_id_here
+   DISCORD_PUBLIC_KEY=your_public_key_here
+   DISCORD_CLIENT_SECRET=your_client_secret_here
+   
+   # OAuth URL (generated with generate_oauth_url.py)
+   DISCORD_OAUTH_URL=your_oauth_url_here
    ```
 4. Run the bot with `python bot.py`
 
-## Database
+## Database Schema
 
-The bot uses SQLite to store:
-- User information
-- Server information
-- Coffee chat requests
-- Active chats
-- Chat history
-- Message history
-- Statistics for users
+The bot uses SQLite with the following tables:
+
+### users
+- `user_id` (PRIMARY KEY): Discord user ID
+- `username`: Discord username
+- `display_name`: Discord display name
+- `created_at`: When the user was first added to the database
+
+### servers
+- `server_id` (PRIMARY KEY): Discord server ID
+- `server_name`: Discord server name
+- `created_at`: When the server was first added to the database
+
+### coffee_requests
+- `request_id` (PRIMARY KEY): Unique identifier for the request
+- `user_id`: User who created the request
+- `server_id`: Server where the request was created
+- `channel_id`: Channel where the request was created
+- `message_id`: Message ID of the request
+- `topic`: Topic of the coffee chat
+- `description`: Description of the coffee chat
+- `created_at`: When the request was created
+- `status`: Status of the request (pending, accepted, cancelled, completed)
+
+### chat_history
+- `chat_id` (PRIMARY KEY): Unique identifier for the chat
+- `request_id`: Associated request ID
+- `user1_id`: First participant
+- `user2_id`: Second participant
+- `accepted_at`: When the chat was accepted
+- `completed_at`: When the chat was completed
+- `duration`: Duration of the chat in seconds
+
+### message_history
+- `message_id` (PRIMARY KEY): Unique identifier for the message
+- `chat_id`: Associated chat ID
+- `sender_id`: User who sent the message
+- `content`: Content of the message
+- `has_attachment`: Whether the message has an attachment
+- `sent_at`: When the message was sent
+
+### statistics
+- `user_id` (PRIMARY KEY): Discord user ID
+- `chats_initiated`: Number of chats initiated
+- `chats_accepted`: Number of chats accepted
+- `total_chat_time`: Total time spent in chats
+- `messages_sent`: Number of messages sent
+- `last_updated`: When the statistics were last updated
+
+## Technical Implementation
+
+### Core Components
+
+1. **Bot Core (`bot.py`)**: Main entry point and event handler
+2. **Coffee Commands (`cogs/coffee_commands.py`)**: Implements the /coffee command and all button interactions
+3. **Message Handler (`utils/message_handler.py`)**: Manages message relay and formatting
+4. **UI Components (`utils/ui.py`)**: Defines custom UI elements like buttons and views
+5. **Database Manager (`utils/database.py`)**: Handles all database operations
+6. **Error Handler (`cogs/error_handler.py`)**: Manages error handling and logging
+
+### Key Technical Features
+
+- **Dynamic UI**: Buttons and views adapt based on user's current state
+- **State Management**: Robust tracking of user states to prevent conflicting actions
+- **Timestamp Handling**: Consistent formatting with fallback mechanisms
+- **Database Transactions**: ACID-compliant operations for data integrity
+- **Error Recovery**: Graceful handling of edge cases and unexpected errors
+- **Cross-Server Communication**: Seamless interaction between users on different servers
+- **Asynchronous Processing**: Non-blocking operations for responsive user experience
 
 ## Hosting on Replit
 
@@ -83,6 +176,10 @@ The bot uses SQLite to store:
 2. Create a new application and add a bot
 3. Enable the necessary intents (Members and Message Content)
 4. Generate an invite link with the `bot` and `applications.commands` scopes
+   - You can use the included `generate_oauth_url.py` script to create this link
+   ```
+   python generate_oauth_url.py --client-id=your_client_id_here
+   ```
 5. Invite the bot to your server
 6. Run the bot using your token
 
@@ -102,6 +199,17 @@ The bot requires the following permissions:
 - Message content is stored in the database for record-keeping
 - Users can end chats at any time
 - The bot only processes messages in DMs during active coffee chats
+- For full details, see our [Privacy Policy](docs/privacy.html)
+- By using the bot, users agree to our [Terms of Service](docs/terms.html)
+
+## Security Measures
+
+- User interactions are validated before processing
+- Credentials are managed via environment variables
+- OAuth with restricted permissions
+- Input sanitization for all user-provided content
+- Rate limiting to prevent abuse
+- Secure database transactions
 
 ## Future Enhancements
 
@@ -109,10 +217,55 @@ The bot requires the following permissions:
 - More detailed statistics and analytics
 - Scheduled coffee chats
 - Topic-based matching
+- AI-powered conversation starters
+- Integration with other platforms
+- Customizable chat duration limits
+- Server-specific configuration options
+- Advanced matching algorithms
+- Internationalization support
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Bot not responding to commands**
+   - Ensure the bot has proper permissions
+   - Check if the bot is online
+   - Verify slash commands are registered
+
+2. **Database errors**
+   - Check file permissions for the SQLite database
+   - Ensure no other process is locking the database
+
+3. **Message relay issues**
+   - Verify the bot can send DMs to users
+   - Check if users have DMs enabled
+
+### Debugging
+
+The bot uses Python's logging module with different log levels:
+- INFO: General operational information
+- WARNING: Potential issues that don't affect functionality
+- ERROR: Problems that affect functionality
+- DEBUG: Detailed information for troubleshooting
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests
+5. Submit a pull request
+
+### Code Style
+
+This project follows PEP 8 guidelines with the following exceptions:
+- Line length limit of 100 characters
+- Use of double quotes for strings
 
 ## Requirements
 
@@ -120,4 +273,22 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - discord.py 2.0 or higher
 - aiosqlite for database management
 - python-dotenv for environment variables
-- flask for Replit hosting
+- flask for web server
+- PyNaCl for interaction verification
+- requests for API calls
+
+## Additional Files
+
+- `generate_oauth_url.py` - Script to generate OAuth2 URLs with the correct permissions
+- `interactions_endpoint.py` - Flask server for handling Discord interactions via HTTP
+- `docs/` - Directory containing HTML documentation, privacy policy, and terms of service
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgements
+
+- Discord.py team for the excellent library
+- All contributors who have helped improve this bot
+- The Discord community for feedback and support

@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.ui import ChatView
-from database import save_message, get_active_chat, end_chat, get_chat_details
+from database import save_message, get_active_chat, end_chat, get_chat_details, get_request_by_chat_id, get_request_by_id
 
 logger = logging.getLogger('coffee_bot.message_handler')
 
@@ -175,22 +175,25 @@ class MessageHandler:
             partner = await self.bot.fetch_user(partner_id)
             
             # Create stylized end chat embeds
+            user_name = f"{user.display_name} ({user.name})"
+            partner_name = f"{partner.display_name} ({partner.name})"
+            
             user_embed = discord.Embed(
                 title="☕ Coffee Chat Ended",
-                description=f"Your chat with **{partner.display_name} ({partner.name})** has ended.",
-                color=discord.Color.gold()
+                description=f"Your coffee chat with **{partner_name}** has ended.",
+                color=discord.Color.purple()
             )
             user_embed.add_field(name="Duration", value=f"{duration} minutes", inline=True)
-            user_embed.add_field(name="Ended at", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=True)
+            user_embed.add_field(name="Ended at", value=f"<t:{int(datetime.now().timestamp())}:f>", inline=True)
             user_embed.set_footer(text=f"Chat ID: {chat_id}")
             
             partner_embed = discord.Embed(
                 title="☕ Coffee Chat Ended",
-                description=f"Your chat with **{user.display_name} ({user.name})** has ended.",
-                color=discord.Color.gold()
+                description=f"Your coffee chat with **{user_name}** has ended.",
+                color=discord.Color.purple()
             )
             partner_embed.add_field(name="Duration", value=f"{duration} minutes", inline=True)
-            partner_embed.add_field(name="Ended at", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=True)
+            partner_embed.add_field(name="Ended at", value=f"<t:{int(datetime.now().timestamp())}:f>", inline=True)
             partner_embed.set_footer(text=f"Chat ID: {chat_id}")
             
             # Notify users with stylized embeds
@@ -256,6 +259,20 @@ class MessageHandler:
                 responder = await self.bot.fetch_user(request['responder_id'])
                 responder_name = f"{responder.display_name} ({responder.name})"
             
+            # Helper function to convert timestamp string to unix timestamp
+            def get_timestamp(ts):
+                if not ts:
+                    return int(datetime.now().timestamp())
+                if isinstance(ts, str):
+                    try:
+                        # Try parsing ISO format
+                        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                        return int(dt.timestamp())
+                    except ValueError:
+                        # Default to current time if parsing fails
+                        return int(datetime.now().timestamp())
+                return int(ts)
+            
             # Create embed based on request status
             if request['status'] == 'pending':
                 embed = discord.Embed(
@@ -265,7 +282,7 @@ class MessageHandler:
                 )
                 embed.add_field(name="Requested by", value=requester_name, inline=True)
                 embed.add_field(name="Status", value="Pending", inline=True)
-                embed.add_field(name="Created at", value=f"<t:{int(request['created_at'])}:R>", inline=True)
+                embed.add_field(name="Created at", value=f"<t:{get_timestamp(request['created_at'])}:f>", inline=True)
                 
                 # Create view with accept button
                 view = discord.ui.View()
@@ -287,8 +304,8 @@ class MessageHandler:
                 embed.add_field(name="Requested by", value=requester_name, inline=True)
                 embed.add_field(name="Accepted by", value=responder_name, inline=True)
                 embed.add_field(name="Status", value="In Progress", inline=True)
-                embed.add_field(name="Created at", value=f"<t:{int(request['created_at'])}:R>", inline=True)
-                embed.add_field(name="Accepted at", value=f"<t:{int(request['accepted_at'])}:R>", inline=True)
+                embed.add_field(name="Created at", value=f"<t:{get_timestamp(request['created_at'])}:f>", inline=True)
+                embed.add_field(name="Accepted at", value=f"<t:{get_timestamp(request['accepted_at'])}:f>", inline=True)
                 
                 await message.edit(embed=embed, view=None)
                 
@@ -299,14 +316,14 @@ class MessageHandler:
                 embed = discord.Embed(
                     title=f"☕ Coffee Chat Request: {request['topic']}",
                     description=request['description'],
-                    color=discord.Color.gold()
+                    color=discord.Color.purple()
                 )
                 embed.add_field(name="Requested by", value=requester_name, inline=True)
                 embed.add_field(name="Accepted by", value=responder_name, inline=True)
                 embed.add_field(name="Duration", value=f"{duration} minutes", inline=True)
                 embed.add_field(name="Status", value="Completed", inline=True)
-                embed.add_field(name="Created at", value=f"<t:{int(request['created_at'])}:R>", inline=True)
-                embed.add_field(name="Completed at", value=f"<t:{int(request['completed_at'])}:R>", inline=True)
+                embed.add_field(name="Created at", value=f"<t:{get_timestamp(request['created_at'])}:f>", inline=True)
+                embed.add_field(name="Completed at", value=f"<t:{get_timestamp(request['completed_at'])}:f>", inline=True)
                 
                 await message.edit(embed=embed, view=None)
                 
@@ -318,8 +335,8 @@ class MessageHandler:
                 )
                 embed.add_field(name="Requested by", value=requester_name, inline=True)
                 embed.add_field(name="Status", value="Cancelled", inline=True)
-                embed.add_field(name="Created at", value=f"<t:{int(request['created_at'])}:R>", inline=True)
-                embed.add_field(name="Cancelled at", value=f"<t:{int(request['cancelled_at'])}:R>", inline=True)
+                embed.add_field(name="Created at", value=f"<t:{get_timestamp(request['created_at'])}:f>", inline=True)
+                embed.add_field(name="Cancelled at", value=f"<t:{get_timestamp(request['cancelled_at'])}:f>", inline=True)
                 
                 await message.edit(embed=embed, view=None)
             

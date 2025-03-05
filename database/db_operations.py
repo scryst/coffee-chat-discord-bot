@@ -305,6 +305,20 @@ async def end_chat(chat_id, duration=None):
             (chat_id,)
         )
         
+        # Get the request_id for this chat
+        cursor = await db.execute(
+            "SELECT request_id FROM active_chats WHERE chat_id = ?",
+            (chat_id,)
+        )
+        result = await cursor.fetchone()
+        if result:
+            request_id = result[0]
+            # Update request status to completed
+            await db.execute(
+                "UPDATE chat_requests SET status = 'completed' WHERE request_id = ?",
+                (request_id,)
+            )
+        
         # Create chat history entry
         await db.execute(
             """
@@ -416,3 +430,73 @@ async def get_chat_details(chat_id):
         chat_dict['responder_name'] = chat_dict['user2_name']
         
         return chat_dict
+
+async def get_request_by_chat_id(chat_id):
+    """Get a request by its associated chat ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        
+        cursor = await db.execute(
+            """
+            SELECT 
+                cr.request_id,
+                cr.user_id as requester_id,
+                ac.user2_id as responder_id,
+                cr.server_id as guild_id,
+                cr.topic,
+                cr.description,
+                cr.created_at,
+                cr.status,
+                cr.message_id,
+                cr.channel_id,
+                ac.started_at as accepted_at,
+                ch.ended_at as completed_at,
+                ch.ended_at as cancelled_at,
+                ch.duration
+            FROM chat_requests cr
+            JOIN active_chats ac ON cr.request_id = ac.request_id
+            LEFT JOIN chat_history ch ON ac.chat_id = ch.chat_id
+            WHERE ac.chat_id = ?
+            """,
+            (chat_id,)
+        )
+        request = await cursor.fetchone()
+        
+        if request:
+            return dict(request)
+        return None
+
+async def get_request_by_id(request_id):
+    """Get a request by its ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        
+        cursor = await db.execute(
+            """
+            SELECT 
+                cr.request_id,
+                cr.user_id as requester_id,
+                cr.server_id as guild_id,
+                cr.topic,
+                cr.description,
+                cr.created_at,
+                cr.status,
+                cr.message_id,
+                cr.channel_id,
+                ac.user2_id as responder_id,
+                ac.started_at as accepted_at,
+                ch.ended_at as completed_at,
+                ch.ended_at as cancelled_at,
+                ch.duration
+            FROM chat_requests cr
+            LEFT JOIN active_chats ac ON cr.request_id = ac.request_id
+            LEFT JOIN chat_history ch ON ac.chat_id = ch.chat_id
+            WHERE cr.request_id = ?
+            """,
+            (request_id,)
+        )
+        request = await cursor.fetchone()
+        
+        if request:
+            return dict(request)
+        return None

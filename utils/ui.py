@@ -35,13 +35,14 @@ class CoffeeChatView(ui.View):
     """Main menu view for the coffee chat bot."""
     
     def __init__(self, request_callback, view_requests_callback, stats_callback, 
-                 leaderboard_callback, cancel_callback):
+                 leaderboard_callback, cancel_callback, end_chat_callback=None):
         super().__init__(timeout=300)  # 5 minute timeout
         self.request_callback = request_callback
         self.view_requests_callback = view_requests_callback
         self.stats_callback = stats_callback
         self.leaderboard_callback = leaderboard_callback
         self.cancel_callback = cancel_callback
+        self.end_chat_callback = end_chat_callback
         
         # Add community button
         self.add_item(discord.ui.Button(
@@ -160,25 +161,40 @@ class ChatView(ui.View):
 
 def create_request_embed(request, user):
     """Create an embed for a chat request."""
+    # Get the timestamp from the request or use current time as fallback
+    created_timestamp = request.get('created_at')
+    if created_timestamp:
+        try:
+            # Try to parse the timestamp if it's a string
+            if isinstance(created_timestamp, str):
+                created_timestamp = int(datetime.fromisoformat(created_timestamp.replace('Z', '+00:00')).timestamp())
+            else:
+                created_timestamp = int(created_timestamp)
+        except (ValueError, TypeError):
+            # Fallback to current time if parsing fails
+            created_timestamp = int(discord.utils.utcnow().timestamp())
+    else:
+        created_timestamp = int(discord.utils.utcnow().timestamp())
+    
     embed = discord.Embed(
-        title=f"Coffee Chat Request: {request['topic']}",
+        title=f"☕ Coffee Chat Request: {request['topic']}",
         description=request['description'] if request['description'] else "No additional details provided.",
         color=discord.Color.blue()
     )
     
     embed.add_field(name="Requested by", value=f"{user.display_name} ({user.name})", inline=True)
     embed.add_field(name="Status", value="Pending", inline=True)
+    embed.add_field(name="Created at", value=f"<t:{created_timestamp}:f>", inline=True)
     embed.set_footer(text=f"Request ID: {request['request_id']}")
-    embed.timestamp = discord.utils.utcnow()
     
     return embed
 
 def create_completed_request_embed(request_id, chat_data, responder_name):
     """Create an embed for a completed chat request."""
     embed = discord.Embed(
-        title=f"Completed Coffee Chat: {chat_data['topic']}",
+        title=f"☕ Completed Coffee Chat: {chat_data['topic']}",
         description=chat_data['description'] if chat_data.get('description') else "No additional details provided.",
-        color=discord.Color.green()
+        color=discord.Color.purple()
     )
     
     # Calculate duration in minutes
@@ -206,11 +222,10 @@ def create_completed_request_embed(request_id, chat_data, responder_name):
     embed.add_field(name="Accepted by", value=responder_name, inline=True)
     embed.add_field(name="Duration", value=f"{duration} minutes", inline=True)
     embed.add_field(name="Status", value="Completed ✅", inline=True)
-    embed.add_field(name="Ended", value=f"<t:{int(end_time.timestamp())}:R>", inline=True)
+    embed.add_field(name="Ended", value=f"<t:{int(end_time.timestamp())}:f>", inline=True)
     
     # Only include the chat_id in the footer since request_id is redundant
     embed.set_footer(text=f"Chat ID: {chat_data['chat_id']}")
-    embed.timestamp = discord.utils.utcnow()
     
     return embed
 

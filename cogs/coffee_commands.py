@@ -52,8 +52,74 @@ class CoffeeCommands(commands.Cog):
                 from bot import status_updater
                 if status_updater:
                     await status_updater.update_status()
-            except (ImportError, AttributeError):
-                logger.warning("Could not update bot status - status_updater not available")
+            except (ImportError, NameError):
+                logger.warning("Could not update bot status: status_updater not found")
+    
+    # Custom view for the coffee chat menu that adapts based on user state
+    class CustomCoffeeChatMainView(CoffeeChatView):
+        def __init__(self, request_callback, view_requests_callback, stats_callback, 
+                    leaderboard_callback, cancel_callback, end_chat_callback,
+                    has_pending_request, in_active_chat, request_count):
+            super().__init__(request_callback, view_requests_callback, stats_callback, 
+                            leaderboard_callback, cancel_callback, end_chat_callback)
+            
+            # Update the Cross-Server Requests button with count
+            for item in self.children[:]:
+                if isinstance(item, discord.ui.Button) and "Cross-Server Requests" in item.label:
+                    self.remove_item(item)
+                    break
+            
+            # Add updated button with count
+            self.add_item(discord.ui.Button(
+                style=discord.ButtonStyle.secondary,
+                label=f"Cross-Server Requests ({request_count})",
+                emoji="🔍",
+                custom_id="view_requests",
+                row=1
+            ))
+            
+            # Handle button visibility based on user's status
+            if in_active_chat:
+                # If user is in a chat, replace the request button with an end chat button
+                for item in self.children[:]:
+                    if isinstance(item, discord.ui.Button) and item.label == "Request Coffee Chat":
+                        self.remove_item(item)
+                        break
+                
+                # Add End Chat button
+                self.add_item(discord.ui.Button(
+                    style=discord.ButtonStyle.danger,
+                    label="End Current Chat",
+                    emoji="🛑",
+                    custom_id="end_chat",
+                    row=0
+                ))
+                
+                # Also remove the cancel button if it exists
+                for item in self.children[:]:
+                    if isinstance(item, discord.ui.Button) and item.label == "Cancel My Request":
+                        self.remove_item(item)
+                        break
+            elif has_pending_request:
+                # Remove the request button if user has a pending request
+                for item in self.children[:]:
+                    if isinstance(item, discord.ui.Button) and item.label == "Request Coffee Chat":
+                        self.remove_item(item)
+                        break
+            else:
+                # Remove the cancel button if user doesn't have a pending request
+                for item in self.children[:]:
+                    if isinstance(item, discord.ui.Button) and item.label == "Cancel My Request":
+                        self.remove_item(item)
+                        break
+        
+        # Override the view_requests_button method to handle the new button
+        async def view_requests_button_callback(self, interaction):
+            await self.view_requests_callback(interaction)
+            
+        # Add end_chat_button callback
+        async def end_chat_button_callback(self, interaction):
+            await self.end_chat_callback(interaction)
     
     @app_commands.command(
         name="coffee", 
@@ -78,65 +144,32 @@ class CoffeeCommands(commands.Cog):
         # Check if user has a pending request
         existing_request = await get_user_request(interaction.user.id)
         
+        # Check if user is in an active chat
+        in_active_chat = await self.bot.message_handler.is_in_active_chat(interaction.user.id)
+        
         # Get the count of pending requests for the button label
         pending_requests = await get_pending_requests(exclude_user_id=interaction.user.id)
         request_count = len(pending_requests)
         
-        # Create custom main menu view based on user's request status
-        class CustomCoffeeChatMainView(CoffeeChatView):
-            def __init__(self, request_callback, view_requests_callback, stats_callback, 
-                        leaderboard_callback, cancel_callback, has_pending_request, request_count):
-                super().__init__(request_callback, view_requests_callback, stats_callback, 
-                                leaderboard_callback, cancel_callback)
-                
-                # Update the Cross-Server Requests button with count
-                for item in self.children[:]:
-                    if isinstance(item, discord.ui.Button) and "Cross-Server Requests" in item.label:
-                        self.remove_item(item)
-                        break
-                
-                # Add updated button with count
-                self.add_item(discord.ui.Button(
-                    style=discord.ButtonStyle.secondary,
-                    label=f"Cross-Server Requests ({request_count})",
-                    emoji="🔍",
-                    custom_id="view_requests",
-                    row=1
-                ))
-                
-                # Remove buttons based on user's request status
-                if has_pending_request:
-                    # Remove the request button if user has a pending request
-                    for item in self.children[:]:
-                        if isinstance(item, discord.ui.Button) and item.label == "Request Coffee Chat":
-                            self.remove_item(item)
-                            break
-                else:
-                    # Remove the cancel button if user doesn't have a pending request
-                    for item in self.children[:]:
-                        if isinstance(item, discord.ui.Button) and item.label == "Cancel My Request":
-                            self.remove_item(item)
-                            break
-            
-            # Override the view_requests_button method to handle the new button
-            async def view_requests_button_callback(self, interaction):
-                await self.view_requests_callback(interaction)
-        
         # Create main menu view with conditional buttons
-        view = CustomCoffeeChatMainView(
+        view = self.CustomCoffeeChatMainView(
             request_callback=self.handle_request,
             view_requests_callback=self.handle_view_requests,
             stats_callback=self.handle_stats,
             leaderboard_callback=self.handle_leaderboard,
             cancel_callback=self.handle_cancel,
+            end_chat_callback=self.handle_end_chat_button,
             has_pending_request=existing_request is not None,
+            in_active_chat=in_active_chat,
             request_count=request_count
         )
         
-        # Add callback for the custom button
+        # Add callbacks for the custom buttons
         for item in view.children:
             if isinstance(item, discord.ui.Button) and item.custom_id == "view_requests":
                 item.callback = view.view_requests_button_callback
+            elif isinstance(item, discord.ui.Button) and item.custom_id == "end_chat":
+                item.callback = view.end_chat_button_callback
         
         # Send menu
         embed = discord.Embed(
@@ -223,16 +256,6 @@ class CoffeeCommands(commands.Cog):
         # Create embed for request
         embed = create_request_embed(request, interaction.user)
         
-        # Send confirmation to user
-        await interaction.response.send_message(
-            "Your coffee chat request has been created!",
-            embed=embed,
-            ephemeral=True
-        )
-        
-        # Send request to channel
-        channel = interaction.channel
-        
         # Create view with accept button
         class AcceptRequestView(discord.ui.View):
             def __init__(self, accept_callback, bot):
@@ -251,9 +274,9 @@ class CoffeeCommands(commands.Cog):
                     return
                 
                 # Check if the user is already in a chat
-                is_in_chat = await self.bot.message_handler.is_in_active_chat(button_interaction.user.id)
+                user_in_chat = await self.bot.message_handler.is_in_active_chat(button_interaction.user.id)
                 
-                if is_in_chat:
+                if user_in_chat:
                     # Just inform the user they're already in a chat
                     await button_interaction.response.send_message(
                         "You are already in an active coffee chat. Please finish your current chat before accepting a new one.",
@@ -266,7 +289,11 @@ class CoffeeCommands(commands.Cog):
         
         view = AcceptRequestView(self.handle_accept_request, self.bot)
         
+        # First acknowledge the interaction
+        await interaction.response.defer(ephemeral=True)
+        
         # Send request to channel
+        channel = interaction.channel
         request_message = await channel.send(
             f"**{interaction.user.display_name}** is looking for a coffee chat!",
             embed=embed,
@@ -336,6 +363,19 @@ class CoffeeCommands(commands.Cog):
                 ephemeral=True
             )
             return
+        
+        # Check if the user has their own pending request and cancel it
+        user_request = await get_user_request(interaction.user.id)
+        if user_request:
+            await cancel_request(user_request['request_id'])
+            # Notify the user that their request was automatically cancelled
+            await interaction.user.send(
+                embed=discord.Embed(
+                    title="Your Request Automatically Cancelled",
+                    description=f"Your coffee chat request '{user_request['topic']}' was automatically cancelled because you accepted another request.",
+                    color=discord.Color.blue()
+                )
+            )
         
         # Get user and server info
         requester_id = request['user_id']
@@ -469,6 +509,17 @@ class CoffeeCommands(commands.Cog):
             await interaction.response.edit_message(embed=embed)
             return
         
+        # Check if user is in an active chat
+        in_active_chat = await self.bot.message_handler.is_in_active_chat(interaction.user.id)
+        if in_active_chat:
+            embed = discord.Embed(
+                title="Cannot Cancel Request",
+                description="You are currently in an active coffee chat. Please end the chat before cancelling your request.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=embed)
+            return
+        
         # Cancel the request
         await cancel_request(request['request_id'])
         
@@ -482,34 +533,27 @@ class CoffeeCommands(commands.Cog):
             color=discord.Color.green()
         )
         
-        # Create a new view with the "Request Coffee Chat" button but without the "Cancel My Request" button
-        view = CoffeeChatView(
-            self.handle_request_button,
-            self.handle_view_requests_button,
-            self.handle_stats_button,
-            self.handle_leaderboard_button,
-            self.handle_cancel_button
-        )
-        
-        # Remove the "Cancel My Request" button
-        cancel_button = None
-        for child in view.children:
-            if isinstance(child, discord.ui.Button) and child.label == "Cancel My Request":
-                cancel_button = child
-                break
-        
-        if cancel_button:
-            view.remove_item(cancel_button)
-        
         # Get pending requests count for the button label
         pending_requests = await get_pending_requests(exclude_user_id=interaction.user.id)
         request_count = len(pending_requests)
         
-        # Update the button label with the count
-        for child in view.children:
-            if isinstance(child, discord.ui.Button) and "Cross-Server Requests" in child.label:
-                child.label = f"Cross-Server Requests ({request_count})"
-                break
+        # Create a new custom view with the updated button configuration
+        view = self.CustomCoffeeChatMainView(
+            request_callback=self.handle_request,
+            view_requests_callback=self.handle_view_requests,
+            stats_callback=self.handle_stats,
+            leaderboard_callback=self.handle_leaderboard,
+            cancel_callback=self.handle_cancel,
+            end_chat_callback=self.handle_end_chat_button,
+            has_pending_request=False,  # No longer has a pending request
+            in_active_chat=in_active_chat,
+            request_count=request_count
+        )
+        
+        # Add callback for the custom button
+        for item in view.children:
+            if isinstance(item, discord.ui.Button) and item.custom_id == "view_requests":
+                item.callback = view.view_requests_button_callback
         
         # Edit the original message
         await interaction.response.edit_message(embed=embed, view=view)

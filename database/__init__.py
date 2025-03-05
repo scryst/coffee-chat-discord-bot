@@ -13,6 +13,8 @@ from .db_operations import (
     get_pending_requests,
     get_user_request,
     cancel_request,
+    get_request_by_chat_id,
+    get_request_by_id,
     
     # Chat operations
     create_chat,
@@ -37,6 +39,8 @@ __all__ = [
     'get_user_request',
     'get_pending_requests',
     'cancel_request',
+    'get_request_by_chat_id',
+    'get_request_by_id',
     'create_chat',
     'get_active_chat',
     'end_chat',
