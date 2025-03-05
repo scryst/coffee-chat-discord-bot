@@ -7,7 +7,7 @@ Set-Location -Path "C:\Users\lhamr\OneDrive\Desktop\autoxi\coffee_bot"
 conda activate base
 
 # Start the bot
-python main.py
+python bot.py
 
 # Keep the window open after the bot stops
 Write-Host "Press any key to exit..."
