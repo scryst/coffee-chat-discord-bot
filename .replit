@@ -1,4 +1,4 @@
-run = "poetry install && poetry run python bot.py"
+run = "./run.sh"
 language = "python3"
 entrypoint = "bot.py"
 hidden = [".env", ".config", "**/__pycache__", "**/.mypy_cache", "**/*.pyc"]
@@ -27,5 +27,5 @@ syntax = "python"
 start = ["pylsp"]
 
 [deployment]
-run = ["sh", "-c", "poetry install && poetry run python bot.py"]
+run = ["sh", "-c", "./run.sh"]
 deploymentTarget = "cloudrun"
