@@ -1,48 +1,57 @@
 # ☕ Coffee Chat Discord Bot
 
-A Discord bot that facilitates spontaneous coffee chats between server members, similar to Yggdrasil's telephone feature.
+A Discord bot that facilitates coffee chats between users across servers, allowing for networking and knowledge sharing.
 
 ## Features
 
-- 🔄 On-demand coffee chat requests at any time
-- 👥 Simple accept/decline interface with interactive buttons
-- 💬 Conversations take place through the bot's DMs
-- 📊 Track coffee chat statistics and history
+- 🔄 Create coffee chat requests with topics and descriptions
+- 🌐 Cross-server functionality to connect with users from different servers
+- 👥 Simple accept interface with interactive buttons
+- 💬 Private conversations through the bot's DMs
+- 📊 Comprehensive statistics and leaderboards
 - 🔔 Direct message notifications for participants
 - ⏱️ Duration tracking for coffee chats
-
-## How It Works
-
-1. A user requests a coffee chat using the `/coffee` command
-2. The request appears in the channel with Accept/Decline buttons
-3. When another user accepts, both users are connected through the bot's DMs
-4. All messages sent to the bot are relayed to the other participant
-5. Either user can end the chat when they're done with `/coffee_end`
-6. Statistics are tracked for each user
+- 📁 Support for file and image sharing during chats
 
 ## Commands
 
-- `/coffee` - Request a coffee chat
-- `/coffee_cancel` - Cancel your pending request
-- `/coffee_end` - End your active coffee chat
-- `/coffee_stats` - View your coffee chat statistics
-- `/coffee_help` - Show help information
+- `/coffee_help` - Shows help information for the bot
+- `/coffee_request` - Create a new coffee chat request with a topic and description
+- `/coffee_cancel` - Cancel your pending coffee chat request
+- `/coffee_list` - List all pending coffee chat requests (with option to view cross-server)
+- `/coffee_stats` - View your personal coffee chat statistics
+- `/coffee_leaderboard` - View the coffee chat leaderboard (server or global)
 
-## Installation
+## How It Works
+
+1. A user creates a coffee chat request using `/coffee_request` with a topic and description
+2. The request appears in the channel with an Accept button
+3. Other users can view available requests with `/coffee_list` (including cross-server requests)
+4. When another user accepts, both users are connected through the bot's DMs
+5. All messages sent to the bot are relayed to the other participant
+6. Either user can end the chat by clicking the "End Chat" button
+7. Statistics are tracked for each user and displayed on leaderboards
+
+## Setup
 
 1. Clone this repository
-2. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
+2. Install dependencies with `pip install -r requirements.txt`
 3. Create a `.env` file with your Discord bot token:
    ```
-   DISCORD_TOKEN=your_token_here
+   DISCORD_TOKEN=your_discord_bot_token_here
    ```
-4. Run the bot:
-   ```
-   python bot.py
-   ```
+4. Run the bot with `python bot.py`
+
+## Database
+
+The bot uses SQLite to store:
+- User information
+- Server information
+- Coffee chat requests
+- Active chats
+- Chat history
+- Message history
+- Statistics for leaderboards
 
 ## Hosting on Replit
 
@@ -60,6 +69,31 @@ A Discord bot that facilitates spontaneous coffee chats between server members, 
 4. Generate an invite link with the `bot` and `applications.commands` scopes
 5. Invite the bot to your server
 6. Run the bot using your token
+
+## Required Permissions
+
+The bot requires the following permissions:
+- Read Messages/View Channels
+- Send Messages
+- Embed Links
+- Attach Files
+- Use Slash Commands
+- Read Message History
+
+## Privacy Considerations
+
+- All messages sent during coffee chats are relayed through the bot
+- Message content is stored in the database for record-keeping
+- Users can end chats at any time
+- The bot only processes messages in DMs during active coffee chats
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Community
+
+Join our Discord community: [https://discord.gg/KGE8BfruV4](https://discord.gg/KGE8BfruV4)
 
 ## Requirements
 

@@ -1,536 +1,685 @@
 import os
 import discord
 from discord import app_commands
-from discord.ext import commands
-import asyncio
-import random
-import datetime
 from dotenv import load_dotenv
+import logging
+import asyncio
 from database import Database
+import io
+import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('coffee_bot')
 
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-# Channel restriction - set this to the channel ID where commands should work
-COFFEE_CHANNEL_ID = os.getenv('COFFEE_CHANNEL_ID')
-if COFFEE_CHANNEL_ID:
-    COFFEE_CHANNEL_ID = int(COFFEE_CHANNEL_ID)
+REPLIT_SERVER = os.getenv('REPLIT_SERVER')
+
+# Initialize database
+db = Database()
 
 # Set up intents
 intents = discord.Intents.default()
-intents.members = True
 intents.message_content = True
+intents.members = True
 
-# Initialize bot
-bot = commands.Bot(command_prefix='!', intents=intents)
-db = Database()
-
-# Message cache for DM conversations
-message_cache = {}
-
-# Store the current channel restriction in memory
-current_channel_id = COFFEE_CHANNEL_ID
-
-# Helper function to check if command is in the allowed channel
-async def check_channel(interaction: discord.Interaction):
-    global current_channel_id
+# Create bot client
+class CoffeeBot(discord.Client):
+    def __init__(self):
+        super().__init__(intents=intents)
+        self.synced = False
+        self.tree = app_commands.CommandTree(self)
     
-    if current_channel_id is None:
-        return True  # No restriction if channel ID is not set
-    
-    if interaction.channel_id != current_channel_id:
-        coffee_channel = interaction.guild.get_channel(current_channel_id)
-        channel_mention = f"<#{current_channel_id}>" if coffee_channel else "the designated channel"
-        await interaction.response.send_message(
-            f"⚠️ This command can only be used in {channel_mention}.",
-            ephemeral=True
+    async def setup_hook(self):
+        # Initialize database
+        await db.setup()
+        logger.info("Database initialized")
+
+    async def on_ready(self):
+        await self.wait_until_ready()
+        if not self.synced:
+            # Sync commands with Discord
+            await self.tree.sync()
+            self.synced = True
+            logger.info(f"Synced commands for {self.user}")
+        
+        logger.info(f"{self.user} is ready and online!")
+        
+        # Set the bot's presence with Discord link
+        await self.change_presence(
+            activity=discord.Activity(
+                type=discord.ActivityType.listening, 
+                name="/coffee_help | discord.gg/KGE8BfruV4"
+            )
         )
-        return False
-    return True
-
-# Helper function to check if user has admin permissions
-def is_admin(interaction: discord.Interaction):
-    return interaction.user.guild_permissions.administrator
-
-# Define view for coffee chat request buttons
-class CoffeeChatRequestView(discord.ui.View):
-    def __init__(self, requester_id, timeout=180):
-        super().__init__(timeout=timeout)
-        self.requester_id = requester_id
-        self.value = None
+        
+    async def on_guild_join(self, guild):
+        """Register server and members when bot joins a new server"""
+        logger.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
+        
+        # Register the server
+        await db.register_server(guild.id, guild.name)
+        
+        # Register all members
+        for member in guild.members:
+            if not member.bot:
+                await db.register_user(member.id, str(member), member.avatar.url if member.avatar else None)
+                await db.add_user_to_server(member.id, guild.id)
+        
+        logger.info(f"Registered {guild.name} and its members")
     
-    @discord.ui.button(label="Accept", style=discord.ButtonStyle.green, emoji="☕")
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Only allow users other than the requester to accept
-        if interaction.user.id == self.requester_id:
-            await interaction.response.send_message("You can't accept your own coffee chat request!", ephemeral=True)
+    async def on_member_join(self, member):
+        """Register new members when they join a server"""
+        if not member.bot:
+            await db.register_user(member.id, str(member), member.avatar.url if member.avatar else None)
+            await db.add_user_to_server(member.id, member.guild.id)
+            logger.info(f"Registered new member: {member} in {member.guild.name}")
+    
+    async def on_interaction(self, interaction):
+        """Handle button interactions"""
+        if not interaction.type == discord.InteractionType.component:
             return
         
-        # Check if the accepting user is already in a call
-        if await db.is_in_call(interaction.user.id):
-            await interaction.response.send_message("You're already in an active coffee chat!", ephemeral=True)
-            return
-        
-        # Check if the requester is still available
-        if not await db.has_pending_request(self.requester_id, interaction.guild.id):
-            await interaction.response.send_message("This coffee chat request is no longer available.", ephemeral=True)
-            self.stop()
-            return
-        
-        # Get user objects
-        requester = interaction.guild.get_member(self.requester_id)
-        accepter = interaction.user
-        
-        if not requester:
-            await interaction.response.send_message("The requester seems to have left the server.", ephemeral=True)
-            self.stop()
-            return
-        
-        # Create the call in the database
-        await db.create_call(self.requester_id, interaction.user.id, interaction.guild.id)
-        
-        # Disable all buttons
-        for item in self.children:
-            item.disabled = True
-        
-        await interaction.response.edit_message(content=f"☕ {accepter.mention} has accepted {requester.mention}'s coffee chat request! Enjoy your conversation!", view=self)
-        
-        # Create a DM channel for both users through the bot
-        try:
-            # Initialize message cache for this conversation
-            chat_id = f"{min(requester.id, accepter.id)}_{max(requester.id, accepter.id)}"
-            message_cache[chat_id] = []
+        # Let the Discord.py handle the interaction first
+        if interaction.data.get('custom_id', '').startswith('accept_coffee:'):
+            # Extract the request ID from the custom_id
+            request_id = int(interaction.data['custom_id'].split(':')[1])
             
-            # Send initial messages to both users
+            # Check if user is the requester
+            request_info = await db.get_user_coffee_request(interaction.user.id)
+            if request_info and request_info['request_id'] == request_id:
+                await interaction.response.send_message(
+                    "You cannot accept your own coffee chat request!",
+                    ephemeral=True
+                )
+                return
+            
+            # Check if user is already in a chat
+            if await db.is_in_chat(interaction.user.id):
+                await interaction.response.send_message(
+                    "You are already in an active coffee chat. "
+                    "Please finish your current chat before accepting a new one.",
+                    ephemeral=True
+                )
+                return
+            
+            # Create the chat
+            chat_info = await db.create_chat(request_id, interaction.user.id)
+            
+            if not chat_info:
+                await interaction.response.send_message(
+                    "Failed to create coffee chat. The request may no longer be available.",
+                    ephemeral=True
+                )
+                return
+            
+            # Get the requester user
+            requester = await client.fetch_user(chat_info['requester_id'])
+            
+            # Create DM channels
             requester_dm = await requester.create_dm()
-            accepter_dm = await accepter.create_dm()
+            accepter_dm = await interaction.user.create_dm()
             
-            # Create message relay view
-            requester_view = MessageRelayView(requester.id, accepter.id, chat_id)
-            accepter_view = MessageRelayView(accepter.id, requester.id, chat_id)
+            # Notify both users
+            embed = discord.Embed(
+                title=f"☕ Coffee Chat Started: {chat_info['topic']}",
+                description="You are now connected! Messages you send here will be relayed to the other person.",
+                color=discord.Color.blue()
+            )
             
-            # Send welcome messages with the chat controls
+            embed.set_footer(text="Join our community: discord.gg/KGE8BfruV4")
+            
+            # Add end chat button
+            view = discord.ui.View(timeout=None)
+            end_button = discord.ui.Button(
+                style=discord.ButtonStyle.danger,
+                label="End Chat",
+                custom_id=f"end_coffee:{chat_info['chat_id']}"
+            )
+            view.add_item(end_button)
+            
+            # Send to requester
             await requester_dm.send(
-                f"☕ **Coffee Chat Started!**\n\nYou're now chatting with {accepter.mention}. Type your messages here and they'll be relayed to them.\n"
-                f"Use `/coffee_end` in the server to end this chat when you're done.",
-                view=requester_view
+                f"**{interaction.user}** has accepted your coffee chat request!",
+                embed=embed,
+                view=view
             )
             
+            # Send to accepter
             await accepter_dm.send(
-                f"☕ **Coffee Chat Started!**\n\nYou're now chatting with {requester.mention}. Type your messages here and they'll be relayed to them.\n"
-                f"Use `/coffee_end` in the server to end this chat when you're done.",
-                view=accepter_view
+                f"You have accepted **{requester}**'s coffee chat request!",
+                embed=embed,
+                view=view
             )
-        except Exception as e:
-            print(f"Error setting up DM channels: {e}")
-        
-        self.value = True
-        self.stop()
-    
-    @discord.ui.button(label="Decline", style=discord.ButtonStyle.red, emoji="❌")
-    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Only allow users other than the requester to decline
-        if interaction.user.id == self.requester_id:
-            await interaction.response.send_message("You can't decline your own coffee chat request!", ephemeral=True)
-            return
-        
-        # Disable all buttons
-        for item in self.children:
-            item.disabled = True
-        
-        await interaction.response.edit_message(content="This coffee chat request has been declined.", view=self)
-        self.value = False
-        self.stop()
-
-# Define view for message relay in DMs
-class MessageRelayView(discord.ui.View):
-    def __init__(self, user_id, target_id, chat_id):
-        super().__init__(timeout=None)  # No timeout for these controls
-        self.user_id = user_id
-        self.target_id = target_id
-        self.chat_id = chat_id
-    
-    @discord.ui.button(label="End Chat", style=discord.ButtonStyle.danger, emoji="🔚", custom_id="end_coffee_chat_dm")
-    async def end_call(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Check if user is part of this call
-        call = await db.get_active_call(interaction.user.id)
-        if not call:
-            await interaction.response.send_message("You don't have an active coffee chat to end.")
-            return
-        
-        # End the call
-        result = await db.end_call(interaction.user.id)
-        if not result:
-            await interaction.response.send_message("Failed to end the coffee chat. Please try again.")
-            return
-        
-        # Get the other user
-        other_user = await bot.fetch_user(call["other_user_id"])
-        other_user_mention = other_user.mention if other_user else "the other participant"
-        
-        # Calculate duration
-        started_at = datetime.datetime.fromisoformat(str(call["started_at"]).replace('Z', '+00:00'))
-        duration = datetime.datetime.now(datetime.timezone.utc) - started_at.replace(tzinfo=datetime.timezone.utc)
-        minutes = int(duration.total_seconds() // 60)
-        seconds = int(duration.total_seconds() % 60)
-        
-        # Disable the button
-        for item in self.children:
-            item.disabled = True
-        
-        await interaction.response.edit_message(view=self)
-        await interaction.followup.send(f"☕ Coffee chat ended! Duration: {minutes}m {seconds}s")
-        
-        # Try to DM the other user
-        if other_user:
+            
+            # Update the original message
             try:
-                other_dm = await other_user.create_dm()
-                await other_dm.send(f"☕ Your coffee chat with {interaction.user.mention} has been ended. It lasted {minutes}m {seconds}s.")
+                await interaction.message.edit(
+                    content=f"This coffee chat has been accepted by {interaction.user.mention}!",
+                    embed=None,
+                    view=None
+                )
             except:
                 pass
+            
+            await interaction.response.send_message(
+                f"You have accepted the coffee chat! Check your DMs to start chatting with {requester.mention}.",
+                ephemeral=True
+            )
+            
+            logger.info(f"Created coffee chat between {requester} and {interaction.user}")
         
-        # Clear the message cache for this chat
-        if self.chat_id in message_cache:
-            del message_cache[self.chat_id]
-
-@bot.event
-async def on_ready():
-    print(f'{bot.user.name} has connected to Discord!')
-    await db.setup()
-    
-    # Sync commands
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
-
-@bot.event
-async def on_message(message):
-    # Ignore messages from the bot itself
-    if message.author == bot.user:
-        return
-    
-    # Check if this is a DM
-    if isinstance(message.channel, discord.DMChannel):
-        # Check if the user is in an active call
-        if await db.is_in_call(message.author.id):
-            # Get call info
-            call_info = await db.get_active_call(message.author.id)
-            other_user_id = call_info["other_user_id"]
+        elif interaction.data.get('custom_id', '').startswith('end_coffee:'):
+            # Extract the chat ID from the custom_id
+            chat_id = int(interaction.data['custom_id'].split(':')[1])
             
-            # Create a chat ID (consistent regardless of who messages first)
-            chat_id = f"{min(message.author.id, other_user_id)}_{max(message.author.id, other_user_id)}"
+            # End the chat
+            chat_info = await db.end_chat(interaction.user.id)
             
-            # Store message in cache
-            if chat_id not in message_cache:
-                message_cache[chat_id] = []
-            message_cache[chat_id].append({
-                "author_id": message.author.id,
-                "content": message.content,
-                "timestamp": datetime.datetime.now().isoformat()
-            })
+            if not chat_info:
+                await interaction.response.send_message(
+                    "You don't have an active coffee chat to end.",
+                    ephemeral=True
+                )
+                return
             
-            # Relay the message to the other user
+            # Get the other user
+            other_user_id = chat_info['requester_id'] if interaction.user.id == chat_info['accepter_id'] else chat_info['accepter_id']
+            other_user = await client.fetch_user(other_user_id)
+            
+            # Format duration
+            duration_minutes = chat_info['duration'] // 60
+            duration_seconds = chat_info['duration'] % 60
+            duration_str = f"{duration_minutes} minutes and {duration_seconds} seconds"
+            
+            # Create summary embed
+            embed = discord.Embed(
+                title="☕ Coffee Chat Ended",
+                description=f"Your coffee chat about **{chat_info['topic']}** has ended.",
+                color=discord.Color.gold()
+            )
+            
+            embed.add_field(
+                name="Duration",
+                value=duration_str,
+                inline=True
+            )
+            
+            embed.add_field(
+                name="Chat Partner",
+                value=str(other_user),
+                inline=True
+            )
+            
+            # Send to both users
             try:
-                other_user = await bot.fetch_user(other_user_id)
+                await interaction.channel.send(embed=embed)
+            except:
+                pass
+            
+            # Try to send to the other user's DM
+            try:
                 other_dm = await other_user.create_dm()
-                
-                # Handle attachments if any
-                files = []
-                for attachment in message.attachments:
-                    files.append(await attachment.to_file())
-                
-                # Send the message
-                await other_dm.send(f"**{message.author.display_name}**: {message.content}", files=files if files else None)
-            except Exception as e:
-                print(f"Error relaying message: {e}")
-                await message.channel.send("Failed to relay your message. The other user may have blocked the bot or left the server.")
-    
-    # Process commands
-    await bot.process_commands(message)
+                await other_dm.send(
+                    f"**{interaction.user}** has ended the coffee chat.",
+                    embed=embed
+                )
+            except:
+                pass
+            
+            await interaction.response.send_message(
+                "You have ended the coffee chat. Thanks for participating!",
+                ephemeral=True
+            )
+            
+            logger.info(f"Ended coffee chat between {interaction.user.id} and {other_user_id}, duration: {duration_str}")
 
-@bot.tree.command(name="coffee", description="Request a random coffee chat with someone")
-async def coffee_request(interaction: discord.Interaction):
-    # Check if command is used in the allowed channel
-    if not await check_channel(interaction):
-        return
-        
-    # Register the user if they're not already in the database
-    await db.register_user(interaction.user.id, str(interaction.user), interaction.guild.id)
+client = CoffeeBot()
+
+# Helper function to register user and server during interactions
+async def register_interaction_user(interaction):
+    """Register user and server during command interactions"""
+    user = interaction.user
+    guild = interaction.guild
     
-    # Check if user is already in a call
-    if await db.is_in_call(interaction.user.id):
-        call_info = await db.get_active_call(interaction.user.id)
-        other_user = interaction.guild.get_member(call_info["other_user_id"])
-        other_user_mention = other_user.mention if other_user else "another user"
-        
+    # Register user
+    await db.register_user(user.id, str(user), user.avatar.url if user.avatar else None)
+    
+    # Register server
+    await db.register_server(guild.id, guild.name)
+    
+    # Add user to server
+    await db.add_user_to_server(user.id, guild.id)
+
+# Basic help command
+@client.tree.command(name="coffee_help", description="Shows help information for Coffee Chat Bot")
+async def coffee_help(interaction: discord.Interaction):
+    await register_interaction_user(interaction)
+    
+    embed = discord.Embed(
+        title="☕ Coffee Chat Bot Help",
+        description="Connect with others through coffee chats!\nJoin our community: [discord.gg/KGE8BfruV4](https://discord.gg/KGE8BfruV4)",
+        color=discord.Color.blue()
+    )
+    
+    embed.add_field(
+        name="Basic Commands",
+        value=(
+            "• `/coffee_help` - Shows this help message\n"
+            "• `/coffee_request` - Create a new coffee chat request\n"
+            "• `/coffee_cancel` - Cancel your pending coffee chat request\n"
+            "• `/coffee_list` - List all pending coffee chat requests\n"
+            "• `/coffee_stats` - View your coffee chat statistics\n"
+            "• `/coffee_leaderboard` - View the coffee chat leaderboard\n"
+        ),
+        inline=False
+    )
+    
+    embed.set_footer(text="Join our Discord community: discord.gg/KGE8BfruV4")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# Create coffee request command
+@client.tree.command(
+    name="coffee_request", 
+    description="Create a new coffee chat request"
+)
+@app_commands.describe(
+    topic="The topic you want to discuss",
+    description="A brief description of what you want to chat about",
+    public="Make your request visible to users in other servers (default: True)"
+)
+async def coffee_request(
+    interaction: discord.Interaction, 
+    topic: str, 
+    description: str, 
+    public: bool = True
+):
+    await register_interaction_user(interaction)
+    
+    # Check if user already has an active request
+    existing_request = await db.get_user_coffee_request(interaction.user.id)
+    if existing_request:
         await interaction.response.send_message(
-            f"☕ You're already in an active coffee chat with {other_user_mention}!",
+            "You already have an active coffee chat request. "
+            "Please cancel it first with `/coffee_cancel` before creating a new one.",
             ephemeral=True
         )
         return
     
-    # Check if user already has a pending request
-    if await db.has_pending_request(interaction.user.id, interaction.guild.id):
+    # Check if user is in an active chat
+    if await db.is_in_chat(interaction.user.id):
         await interaction.response.send_message(
-            "☕ You already have a pending coffee chat request. Use `/coffee_cancel` to cancel it.",
+            "You are currently in an active coffee chat. "
+            "Please finish your current chat before creating a new request.",
             ephemeral=True
         )
         return
     
-    # Create a new request
-    success = await db.create_request(interaction.user.id, interaction.guild.id)
-    if not success:
+    # Create the request
+    request_id = await db.create_coffee_request(
+        interaction.user.id,
+        interaction.guild.id,
+        topic,
+        description,
+        public
+    )
+    
+    if not request_id:
         await interaction.response.send_message(
             "Failed to create coffee chat request. Please try again later.",
             ephemeral=True
         )
         return
     
-    # Create the request view
-    view = CoffeeChatRequestView(interaction.user.id)
-    
-    # Send the request to the channel
-    await interaction.response.send_message(
-        f"☕ {interaction.user.mention} is looking for a coffee chat partner! Click Accept to join them for a conversation.",
-        view=view
+    # Create embed for the request
+    embed = discord.Embed(
+        title=f"☕ Coffee Chat: {topic}",
+        description=description,
+        color=discord.Color.green()
     )
     
-    # Wait for someone to accept or for the view to time out
-    timeout = await view.wait()
+    embed.add_field(
+        name="Requested by",
+        value=interaction.user.mention,
+        inline=True
+    )
     
-    if timeout or view.value is None:
-        # If timed out or no response, cancel the request
-        await db.cancel_request(interaction.user.id, interaction.guild.id)
-        try:
-            await interaction.edit_original_response(
-                content=f"☕ {interaction.user.mention}'s coffee chat request has expired.",
-                view=None
-            )
-        except:
-            pass
+    embed.add_field(
+        name="Visibility",
+        value="Public (Cross-server)" if public else "Server Only",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="Community",
+        value="[Join our Discord](https://discord.gg/KGE8BfruV4)",
+        inline=True
+    )
+    
+    embed.set_footer(text=f"Request ID: {request_id} • Use the buttons below to interact")
+    
+    # Create buttons for the request
+    view = discord.ui.View(timeout=None)
+    
+    # Accept button
+    accept_button = discord.ui.Button(
+        style=discord.ButtonStyle.success,
+        label="Accept Chat",
+        custom_id=f"accept_coffee:{request_id}"
+    )
+    view.add_item(accept_button)
+    
+    # Send the message
+    await interaction.response.send_message(
+        "Your coffee chat request has been created!",
+        ephemeral=True
+    )
+    
+    # Send to channel
+    await interaction.channel.send(embed=embed, view=view)
+    logger.info(f"Created coffee request {request_id} for {interaction.user} in {interaction.guild.name}")
 
-@bot.tree.command(name="coffee_cancel", description="Cancel your pending coffee chat request")
+# Cancel coffee request command
+@client.tree.command(
+    name="coffee_cancel", 
+    description="Cancel your pending coffee chat request"
+)
 async def coffee_cancel(interaction: discord.Interaction):
-    # Check if command is used in the allowed channel
-    if not await check_channel(interaction):
-        return
-        
-    # Check if user has a pending request
-    if not await db.has_pending_request(interaction.user.id, interaction.guild.id):
+    await register_interaction_user(interaction)
+    
+    # Check if user has an active request
+    request = await db.get_user_coffee_request(interaction.user.id)
+    if not request:
         await interaction.response.send_message(
-            "You don't have a pending coffee chat request to cancel.",
+            "You don't have an active coffee chat request to cancel.",
             ephemeral=True
         )
         return
     
     # Cancel the request
-    await db.cancel_request(interaction.user.id, interaction.guild.id)
+    success = await db.cancel_coffee_request(request['request_id'], interaction.user.id)
+    
+    if not success:
+        await interaction.response.send_message(
+            "Failed to cancel your coffee chat request. Please try again later.",
+            ephemeral=True
+        )
+        return
     
     await interaction.response.send_message(
-        "☕ Your coffee chat request has been cancelled.",
+        "Your coffee chat request has been cancelled.",
         ephemeral=True
     )
     
-    # Try to edit the original request message if possible
-    try:
-        # This is a bit tricky since we don't store the message ID
-        # In a full implementation, you might want to store this
-        channel = interaction.channel
-        async for message in channel.history(limit=50):
-            if message.author == bot.user and f"{interaction.user.mention} is looking for a coffee chat partner" in message.content:
-                await message.edit(content=f"☕ {interaction.user.mention}'s coffee chat request has been cancelled.", view=None)
-                break
-    except:
-        pass
+    logger.info(f"Cancelled coffee request {request['request_id']} for {interaction.user}")
 
-@bot.tree.command(name="coffee_end", description="End your active coffee chat")
-async def coffee_end(interaction: discord.Interaction):
-    # Check if command is used in the allowed channel
-    if not await check_channel(interaction):
-        return
-        
-    # Check if user is in a call
-    if not await db.is_in_call(interaction.user.id):
+# List coffee requests command
+@client.tree.command(
+    name="coffee_list", 
+    description="List all open coffee chat requests"
+)
+@app_commands.describe(
+    cross_server="Include requests from other servers (default: False)"
+)
+async def coffee_list(interaction: discord.Interaction, cross_server: bool = False):
+    await register_interaction_user(interaction)
+    
+    # Get all open requests
+    if cross_server:
+        requests = await db.get_all_open_requests(exclude_user_id=interaction.user.id)
+    else:
+        requests = await db.get_all_open_requests(server_id=interaction.guild.id, exclude_user_id=interaction.user.id)
+    
+    if not requests:
         await interaction.response.send_message(
-            "You don't have an active coffee chat to end.",
+            f"No open coffee chat requests found{' across all servers' if cross_server else ' in this server'}.",
             ephemeral=True
         )
         return
     
-    # Get call info
-    call_info = await db.get_active_call(interaction.user.id)
-    other_user = interaction.guild.get_member(call_info["other_user_id"])
-    other_user_mention = other_user.mention if other_user else "the other participant"
-    
-    # End the call
-    result = await db.end_call(interaction.user.id)
-    if not result:
-        await interaction.response.send_message(
-            "Failed to end the coffee chat. Please try again.",
-            ephemeral=True
-        )
-        return
-    
-    # Calculate duration
-    started_at = datetime.datetime.fromisoformat(str(call_info["started_at"]).replace('Z', '+00:00'))
-    duration = datetime.datetime.now(datetime.timezone.utc) - started_at.replace(tzinfo=datetime.timezone.utc)
-    minutes = int(duration.total_seconds() // 60)
-    seconds = int(duration.total_seconds() % 60)
-    
-    await interaction.response.send_message(
-        f"☕ Coffee chat with {other_user_mention} has ended! It lasted {minutes}m {seconds}s."
-    )
-    
-    # Try to DM the other user
-    if other_user:
-        try:
-            await other_user.send(f"☕ Your coffee chat with {interaction.user.mention} has been ended. It lasted {minutes}m {seconds}s.")
-        except:
-            pass
-    
-    # Clear the message cache for this chat
-    chat_id = f"{min(interaction.user.id, call_info['other_user_id'])}_{max(interaction.user.id, call_info['other_user_id'])}"
-    if chat_id in message_cache:
-        del message_cache[chat_id]
-
-@bot.tree.command(name="coffee_stats", description="View your coffee chat statistics")
-async def coffee_stats(interaction: discord.Interaction):
-    # Check if command is used in the allowed channel
-    if not await check_channel(interaction):
-        return
-        
-    # Get user stats
-    stats = await db.get_call_stats(interaction.user.id, interaction.guild.id)
-    
-    # Create embed
+    # Create embed for the requests
     embed = discord.Embed(
-        title="☕ Coffee Chat Statistics",
-        description=f"Stats for {interaction.user.mention}",
-        color=discord.Color.orange()
+        title="☕ Open Coffee Chat Requests",
+        description=f"Found {len(requests)} open requests{' across all servers' if cross_server else ' in this server'}.",
+        color=discord.Color.blue()
     )
     
-    embed.add_field(
-        name="Total Coffee Chats",
-        value=str(stats["total_calls"]),
-        inline=True
-    )
-    
-    # Format total duration
-    total_minutes = stats["total_duration"] // 60
-    total_hours = total_minutes // 60
-    remaining_minutes = total_minutes % 60
-    
-    duration_str = f"{total_hours}h {remaining_minutes}m" if total_hours > 0 else f"{total_minutes}m"
-    
-    embed.add_field(
-        name="Total Time Spent",
-        value=duration_str,
-        inline=True
-    )
-    
-    # Add average duration if there were any calls
-    if stats["total_calls"] > 0:
-        avg_duration = stats["total_duration"] / stats["total_calls"]
-        avg_minutes = int(avg_duration // 60)
-        avg_seconds = int(avg_duration % 60)
-        
+    # Add each request to the embed
+    for i, request in enumerate(requests[:10]):  # Limit to 10 requests to avoid hitting embed limits
         embed.add_field(
-            name="Average Duration",
-            value=f"{avg_minutes}m {avg_seconds}s",
-            inline=True
-        )
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="coffee_help", description="Learn how to use the Coffee Chat bot")
-async def coffee_help(interaction: discord.Interaction):
-    # Check if command is used in the allowed channel
-    if not await check_channel(interaction):
-        return
-        
-    embed = discord.Embed(
-        title="☕ Coffee Chat Bot Help",
-        description="Connect with your community through spontaneous coffee chats!",
-        color=discord.Color.orange()
-    )
-    
-    embed.add_field(
-        name="/coffee",
-        value="Request a coffee chat. This sends a message to the channel that others can accept.",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="/coffee_cancel",
-        value="Cancel your pending coffee chat request.",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="/coffee_end",
-        value="End your active coffee chat.",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="/coffee_stats",
-        value="View your coffee chat statistics.",
-        inline=False
-    )
-    
-    # Add admin command info if user is an admin
-    if is_admin(interaction):
-        embed.add_field(
-            name="/coffee_set_channel",
-            value="**Admin only:** Set which channel the coffee bot can be used in. Leave the channel blank to allow usage in all channels.",
+            name=f"{i+1}. {request['topic']} (by {request['username']})",
+            value=(
+                f"**Description:** {request['description'][:100]}{'...' if len(request['description']) > 100 else ''}\n"
+                f"**Server:** {request['server_name']}\n"
+                f"**Created:** <t:{int(datetime.datetime.fromisoformat(str(request['created_at']).replace('Z', '+00:00')).timestamp())}:R>"
+            ),
             inline=False
         )
     
+    # Add note if there are more requests
+    if len(requests) > 10:
+        embed.set_footer(text=f"Showing 10 of {len(requests)} requests. Use the command again to see more.")
+    
+    # Create view with buttons for each request
+    view = discord.ui.View(timeout=None)
+    
+    # Add buttons for each request (up to 5 due to Discord UI limitations)
+    for i, request in enumerate(requests[:5]):
+        button = discord.ui.Button(
+            style=discord.ButtonStyle.success,
+            label=f"Accept #{i+1}",
+            custom_id=f"accept_coffee:{request['request_id']}"
+        )
+        view.add_item(button)
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    logger.info(f"Listed {len(requests)} coffee requests for {interaction.user}")
+
+# Message relay event
+@client.event
+async def on_message(message):
+    # Ignore messages from the bot itself
+    if message.author == client.user:
+        return
+    
+    # Only process DM messages
+    if not isinstance(message.channel, discord.DMChannel):
+        return
+    
+    # Check if user is in an active chat
+    chat_info = await db.get_active_chat(message.author.id)
+    if not chat_info:
+        return
+    
+    # Get the other user
+    other_user = await client.fetch_user(chat_info['other_user_id'])
+    
+    # Create DM channel with the other user
+    other_dm = await other_user.create_dm()
+    
+    # Format the message
+    content = f"**{message.author}:** {message.content}"
+    
+    # Handle attachments
+    files = []
+    for attachment in message.attachments:
+        try:
+            file_bytes = await attachment.read()
+            discord_file = discord.File(
+                fp=io.BytesIO(file_bytes),
+                filename=attachment.filename
+            )
+            files.append(discord_file)
+        except Exception as e:
+            logger.error(f"Failed to relay attachment: {e}")
+    
+    # Store the message in the database
+    has_attachment = len(files) > 0
+    await db.store_message(
+        chat_info['chat_id'],
+        message.author.id,
+        message.content,
+        has_attachment
+    )
+    
+    # Relay the message
+    try:
+        await other_dm.send(content=content, files=files)
+        logger.info(f"Relayed message from {message.author.id} to {other_user.id}")
+    except Exception as e:
+        logger.error(f"Failed to relay message: {e}")
+        await message.channel.send("Failed to send your message to the other user. They may have blocked the bot.")
+
+# User stats command
+@client.tree.command(
+    name="coffee_stats", 
+    description="View your coffee chat statistics"
+)
+async def coffee_stats(interaction: discord.Interaction):
+    await register_interaction_user(interaction)
+    
+    # Get user stats
+    stats = await db.get_user_stats(interaction.user.id)
+    
+    # Create embed for the stats
+    embed = discord.Embed(
+        title=f"☕ Coffee Chat Stats for {interaction.user}",
+        color=discord.Color.blue()
+    )
+    
+    # Format times
+    total_hours = stats['total_duration'] // 3600
+    total_minutes = (stats['total_duration'] % 3600) // 60
+    
+    avg_minutes = stats['avg_duration'] // 60
+    avg_seconds = stats['avg_duration'] % 60
+    
+    max_minutes = stats['max_duration'] // 60
+    max_seconds = stats['max_duration'] % 60
+    
+    # Add stats to the embed
     embed.add_field(
-        name="How it works",
-        value="When you request a coffee chat, others can accept your invitation. "
-              "Once accepted, you'll both be connected through the bot's DMs. "
-              "All messages you send to the bot will be relayed to your chat partner. "
-              "When you're done, use `/coffee_end` to end the chat.",
-        inline=False
+        name="Total Chats",
+        value=str(stats['total_chats']),
+        inline=True
+    )
+    
+    embed.add_field(
+        name="Total Time",
+        value=f"{total_hours}h {total_minutes}m" if stats['total_duration'] > 0 else "0m",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="Unique Partners",
+        value=str(stats['unique_partners']),
+        inline=True
+    )
+    
+    embed.add_field(
+        name="Chats Initiated",
+        value=str(stats['chats_initiated']),
+        inline=True
+    )
+    
+    embed.add_field(
+        name="Chats Accepted",
+        value=str(stats['chats_accepted']),
+        inline=True
+    )
+    
+    embed.add_field(
+        name="Average Duration",
+        value=f"{avg_minutes}m {avg_seconds}s" if stats['avg_duration'] > 0 else "0m",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="Longest Chat",
+        value=f"{max_minutes}m {max_seconds}s" if stats['max_duration'] > 0 else "0m",
+        inline=True
     )
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
+    logger.info(f"Displayed stats for {interaction.user}")
 
-@bot.tree.command(name="coffee_set_channel", description="Set which channel the coffee bot can be used in (Admin only)")
-async def coffee_set_channel(interaction: discord.Interaction, channel: discord.TextChannel = None):
-    # Check if user is an admin
-    if not is_admin(interaction):
+# Leaderboard command
+@client.tree.command(
+    name="coffee_leaderboard", 
+    description="View the coffee chat leaderboard"
+)
+@app_commands.describe(
+    server_only="Show only users from this server (default: True)"
+)
+async def coffee_leaderboard(interaction: discord.Interaction, server_only: bool = True):
+    await register_interaction_user(interaction)
+    
+    # Get leaderboard
+    if server_only:
+        leaderboard = await db.get_leaderboard(server_id=interaction.guild.id)
+    else:
+        leaderboard = await db.get_leaderboard()
+    
+    if not leaderboard:
         await interaction.response.send_message(
-            "⚠️ Only server administrators can use this command.",
+            "No coffee chat data found for the leaderboard.",
             ephemeral=True
         )
         return
     
-    global current_channel_id
+    # Create embed for the leaderboard
+    embed = discord.Embed(
+        title="☕ Coffee Chat Leaderboard",
+        description=f"Top chatters{' in this server' if server_only else ''}",
+        color=discord.Color.gold()
+    )
     
-    if channel is None:
-        # If no channel is specified, remove the restriction
-        current_channel_id = None
-        await interaction.response.send_message(
-            "☕ Channel restriction removed. The Coffee Chat bot can now be used in any channel.",
-            ephemeral=False
+    # Add leaderboard entries
+    for i, entry in enumerate(leaderboard):
+        # Format time
+        hours = entry['total_duration'] // 3600
+        minutes = (entry['total_duration'] % 3600) // 60
+        time_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+        
+        # Add medal emoji for top 3
+        medal = ""
+        if i == 0:
+            medal = "🥇 "
+        elif i == 1:
+            medal = "🥈 "
+        elif i == 2:
+            medal = "🥉 "
+        
+        embed.add_field(
+            name=f"{medal}#{i+1}: {entry['username']}",
+            value=f"**Chats:** {entry['chat_count']} | **Time:** {time_str}",
+            inline=False
         )
-    else:
-        # Set the restriction to the specified channel
-        current_channel_id = channel.id
-        await interaction.response.send_message(
-            f"☕ Coffee Chat bot is now restricted to {channel.mention}.",
-            ephemeral=False
-        )
+    
+    embed.set_footer(text="Join our community: discord.gg/KGE8BfruV4")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=False)
+    logger.info(f"Displayed leaderboard for {interaction.user}")
 
+# Run the bot
 if __name__ == "__main__":
-    # For Replit hosting
-    keep_alive_server = os.getenv('REPLIT_SERVER')
-    if keep_alive_server:
-        from keep_alive import keep_alive
-        keep_alive()
-    
-    bot.run(TOKEN)
+    if TOKEN:
+        # Start keep-alive server if running on Replit
+        if REPLIT_SERVER:
+            try:
+                from keep_alive import keep_alive
+                keep_alive()
+                logger.info("Started keep-alive server for Replit")
+            except Exception as e:
+                logger.error(f"Failed to start keep-alive server: {e}")
+        
+        # Run the bot
+        client.run(TOKEN)
+    else:
+        logger.error("No Discord token found. Please set the DISCORD_TOKEN environment variable.")

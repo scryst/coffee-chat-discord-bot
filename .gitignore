@@ -22,6 +22,7 @@ var/
 
 # Database
 *.db
+*.sqlite
 *.sqlite3
 
 # Environment variables
@@ -36,6 +37,9 @@ ENV/
 .vscode/
 *.swp
 *.swo
+
+# Logs
+*.log
 
 # OS specific
 .DS_Store
