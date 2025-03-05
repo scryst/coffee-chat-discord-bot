@@ -1,8 +1,14 @@
 import discord
 import logging
 from datetime import datetime
-from .ui import ChatView
-from ..database import save_message, get_active_chat, end_chat
+import sys
+import os
+
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.ui import ChatView
+from database import save_message, get_active_chat, end_chat, get_chat_details
 
 logger = logging.getLogger('coffee_bot.message_handler')
 
@@ -100,7 +106,8 @@ class MessageHandler:
             description=message.content if message.content else "*No text content*",
             color=discord.Color.blue()
         )
-        embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
+        # Include both display name and username in the author field
+        embed.set_author(name=f"{message.author.display_name} ({message.author.name})", icon_url=message.author.display_avatar.url)
         embed.timestamp = message.created_at
         
         # Handle attachments
@@ -144,48 +151,182 @@ class MessageHandler:
         await interaction.response.defer()
         await self.end_user_chat(user_id)
     
-    async def end_user_chat(self, user_id):
+    async def end_user_chat(self, user_id, silent=False):
         """End a chat for a user and notify their partner."""
-        if user_id not in self.active_chats:
+        chat_data = self.active_chats.pop(user_id, None)
+        if not chat_data:
             return False
         
-        chat_data = self.active_chats[user_id]
-        chat_id = chat_data['chat_id']
         partner_id = chat_data['partner_id']
-        start_time = chat_data['start_time']
+        chat_id = chat_data['chat_id']
         
         # Calculate duration in minutes
-        duration = int((datetime.now() - start_time).total_seconds() / 60)
+        duration = int((datetime.now() - chat_data['start_time']).total_seconds() / 60)
         
         # End chat in database
         await end_chat(chat_id, duration)
         
-        # Notify both users
-        user = await self.bot.fetch_user(user_id)
-        partner = await self.bot.fetch_user(partner_id)
+        # Update the original request message with completion details
+        await self.update_request_message(chat_id)
         
-        end_embed = discord.Embed(
-            title="☕ Coffee Chat Ended",
-            description=f"Your coffee chat has ended. Duration: {duration} minutes.",
-            color=discord.Color.red()
-        )
-        end_embed.set_footer(text=f"Chat ID: {chat_id}")
-        
-        try:
-            await user.send(embed=end_embed)
-        except discord.Forbidden:
-            logger.error(f"Cannot send end message to user {user_id}")
-        
-        try:
-            await partner.send(embed=end_embed)
-        except discord.Forbidden:
-            logger.error(f"Cannot send end message to user {partner_id}")
+        if not silent:
+            # Notify both users about the chat ending
+            user = await self.bot.fetch_user(user_id)
+            partner = await self.bot.fetch_user(partner_id)
+            
+            # Create stylized end chat embeds
+            user_embed = discord.Embed(
+                title="☕ Coffee Chat Ended",
+                description=f"Your chat with **{partner.display_name} ({partner.name})** has ended.",
+                color=discord.Color.gold()
+            )
+            user_embed.add_field(name="Duration", value=f"{duration} minutes", inline=True)
+            user_embed.add_field(name="Ended at", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=True)
+            user_embed.set_footer(text=f"Chat ID: {chat_id}")
+            
+            partner_embed = discord.Embed(
+                title="☕ Coffee Chat Ended",
+                description=f"Your chat with **{user.display_name} ({user.name})** has ended.",
+                color=discord.Color.gold()
+            )
+            partner_embed.add_field(name="Duration", value=f"{duration} minutes", inline=True)
+            partner_embed.add_field(name="Ended at", value=f"<t:{int(datetime.now().timestamp())}:F>", inline=True)
+            partner_embed.set_footer(text=f"Chat ID: {chat_id}")
+            
+            # Notify users with stylized embeds
+            await user.send(embed=user_embed)
+            await partner.send(embed=partner_embed)
         
         # Clean up active chats
-        await self.cleanup_chat(user_id)
+        await self.cleanup_chat(partner_id)
+        
+        # Update bot status after ending a chat
+        await self.update_bot_status()
         
         logger.info(f"Ended chat {chat_id} between users {user_id} and {partner_id}")
         return True
+        
+    async def update_bot_status(self):
+        """Update the bot's status to reflect available coffee chats."""
+        if hasattr(self.bot, 'status_updater') and self.bot.status_updater:
+            await self.bot.status_updater.update_status()
+    
+    async def update_request_message(self, chat_id=None, request_id=None):
+        """Update a request message with the latest status."""
+        if not chat_id and not request_id:
+            return False
+        
+        try:
+            if chat_id:
+                # Get request by chat_id
+                request = await get_request_by_chat_id(chat_id)
+            else:
+                # Get request by request_id
+                request = await get_request_by_id(request_id)
+            
+            if not request:
+                return False
+            
+            # Get message details
+            guild_id = request['guild_id']
+            channel_id = request['channel_id']
+            message_id = request['message_id']
+            
+            # Get guild and channel
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                return False
+            
+            channel = guild.get_channel(channel_id)
+            if not channel:
+                return False
+            
+            # Try to get the message
+            try:
+                message = await channel.fetch_message(message_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+            
+            # Get user information
+            requester = await self.bot.fetch_user(request['requester_id'])
+            requester_name = f"{requester.display_name} ({requester.name})"
+            
+            responder_name = "None"
+            if request['responder_id']:
+                responder = await self.bot.fetch_user(request['responder_id'])
+                responder_name = f"{responder.display_name} ({responder.name})"
+            
+            # Create embed based on request status
+            if request['status'] == 'pending':
+                embed = discord.Embed(
+                    title=f"☕ Coffee Chat Request: {request['topic']}",
+                    description=request['description'],
+                    color=discord.Color.blue()
+                )
+                embed.add_field(name="Requested by", value=requester_name, inline=True)
+                embed.add_field(name="Status", value="Pending", inline=True)
+                embed.add_field(name="Created at", value=f"<t:{int(request['created_at'])}:R>", inline=True)
+                
+                # Create view with accept button
+                view = discord.ui.View()
+                accept_button = discord.ui.Button(
+                    label="Accept Request", 
+                    style=discord.ButtonStyle.green,
+                    custom_id=f"accept_request:{request['request_id']}"
+                )
+                view.add_item(accept_button)
+                
+                await message.edit(embed=embed, view=view)
+                
+            elif request['status'] == 'accepted':
+                embed = discord.Embed(
+                    title=f"☕ Coffee Chat Request: {request['topic']}",
+                    description=request['description'],
+                    color=discord.Color.green()
+                )
+                embed.add_field(name="Requested by", value=requester_name, inline=True)
+                embed.add_field(name="Accepted by", value=responder_name, inline=True)
+                embed.add_field(name="Status", value="In Progress", inline=True)
+                embed.add_field(name="Created at", value=f"<t:{int(request['created_at'])}:R>", inline=True)
+                embed.add_field(name="Accepted at", value=f"<t:{int(request['accepted_at'])}:R>", inline=True)
+                
+                await message.edit(embed=embed, view=None)
+                
+            elif request['status'] == 'completed':
+                # Calculate duration in minutes
+                duration = request['duration'] or 0
+                
+                embed = discord.Embed(
+                    title=f"☕ Coffee Chat Request: {request['topic']}",
+                    description=request['description'],
+                    color=discord.Color.gold()
+                )
+                embed.add_field(name="Requested by", value=requester_name, inline=True)
+                embed.add_field(name="Accepted by", value=responder_name, inline=True)
+                embed.add_field(name="Duration", value=f"{duration} minutes", inline=True)
+                embed.add_field(name="Status", value="Completed", inline=True)
+                embed.add_field(name="Created at", value=f"<t:{int(request['created_at'])}:R>", inline=True)
+                embed.add_field(name="Completed at", value=f"<t:{int(request['completed_at'])}:R>", inline=True)
+                
+                await message.edit(embed=embed, view=None)
+                
+            elif request['status'] == 'cancelled':
+                embed = discord.Embed(
+                    title=f"☕ Coffee Chat Request: {request['topic']}",
+                    description=request['description'],
+                    color=discord.Color.red()
+                )
+                embed.add_field(name="Requested by", value=requester_name, inline=True)
+                embed.add_field(name="Status", value="Cancelled", inline=True)
+                embed.add_field(name="Created at", value=f"<t:{int(request['created_at'])}:R>", inline=True)
+                embed.add_field(name="Cancelled at", value=f"<t:{int(request['cancelled_at'])}:R>", inline=True)
+                
+                await message.edit(embed=embed, view=None)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error updating request message: {e}")
+            return False
     
     async def cleanup_chat(self, user_id):
         """Clean up chat data for a user and their partner."""

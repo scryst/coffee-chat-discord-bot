@@ -13,10 +13,13 @@ Join our Discord community to get help, share feedback, and connect with other u
 - 🌐 Cross-server functionality to connect with users from different servers
 - 👥 Simple menu-based UI with interactive buttons
 - 💬 Private conversations through the bot's DMs
-- 📊 Comprehensive statistics and leaderboards
+- 📊 Basic statistics tracking for users
 - 🔔 Direct message notifications for participants
 - ⏱️ Duration tracking for coffee chats
 - 📁 Support for file and image sharing during chats
+- 👤 Display of both username and display name for better identification
+- 🎨 Stylized messages and embeds for improved user experience
+- 🔄 Dynamic UI updates with in-place message editing
 
 ## Commands
 
@@ -40,9 +43,10 @@ From the main menu, users can:
 3. The request appears in the channel with an Accept button
 4. Other users can view and accept requests through the menu
 5. When another user accepts, both users are connected through the bot's DMs
-6. All messages sent to the bot are relayed to the other participant
+6. All messages sent to the bot are relayed to the other participant with display name and username
 7. Either user can end the chat by clicking the "End Chat" button
-8. Statistics are tracked for each user and displayed on leaderboards
+8. After ending a chat, users receive a stylized summary with chat duration
+9. Statistics are tracked for each user and displayed on leaderboards
 
 ## Setup
 
@@ -63,7 +67,7 @@ The bot uses SQLite to store:
 - Active chats
 - Chat history
 - Message history
-- Statistics for leaderboards
+- Statistics for users
 
 ## Hosting on Replit
 
@@ -98,6 +102,13 @@ The bot requires the following permissions:
 - Message content is stored in the database for record-keeping
 - Users can end chats at any time
 - The bot only processes messages in DMs during active coffee chats
+
+## Future Enhancements
+
+- Rating system for coffee chats
+- More detailed statistics and analytics
+- Scheduled coffee chats
+- Topic-based matching
 
 ## Contributing
 

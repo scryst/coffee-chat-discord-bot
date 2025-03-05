@@ -9,6 +9,7 @@ from .db_operations import (
     
     # Chat request operations
     create_chat_request,
+    update_request_message_info,
     get_pending_requests,
     get_user_request,
     cancel_request,
@@ -17,6 +18,7 @@ from .db_operations import (
     create_chat,
     get_active_chat,
     end_chat,
+    get_chat_details,
     
     # Message operations
     save_message,
@@ -31,12 +33,14 @@ __all__ = [
     'get_user_stats',
     'get_or_create_server',
     'create_chat_request',
-    'get_pending_requests',
+    'update_request_message_info',
     'get_user_request',
+    'get_pending_requests',
     'cancel_request',
     'create_chat',
     'get_active_chat',
     'end_chat',
+    'get_chat_details',
     'save_message',
     'get_leaderboard'
 ]

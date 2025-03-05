@@ -44,6 +44,8 @@ async def create_tables():
             description TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             status TEXT DEFAULT 'pending',
+            message_id INTEGER,
+            channel_id INTEGER,
             FOREIGN KEY (user_id) REFERENCES users (user_id),
             FOREIGN KEY (server_id) REFERENCES servers (server_id)
         )

@@ -1,6 +1,7 @@
 import discord
 from discord import ui
 import logging
+from datetime import datetime
 
 logger = logging.getLogger('coffee_bot.ui')
 
@@ -30,7 +31,7 @@ class CoffeeChatRequestModal(ui.Modal, title="Coffee Chat Request"):
     async def on_submit(self, interaction: discord.Interaction):
         await self.callback_func(interaction, self.topic.value, self.description.value)
 
-class CoffeeChatMainView(ui.View):
+class CoffeeChatView(ui.View):
     """Main menu view for the coffee chat bot."""
     
     def __init__(self, request_callback, view_requests_callback, stats_callback, 
@@ -54,7 +55,7 @@ class CoffeeChatMainView(ui.View):
     async def request_button(self, interaction: discord.Interaction, button: ui.Button):
         await self.request_callback(interaction)
     
-    @ui.button(label="View Requests", style=discord.ButtonStyle.secondary, emoji="🔍")
+    @ui.button(label="Cross-Server Requests", style=discord.ButtonStyle.secondary, emoji="🔍")
     async def view_requests_button(self, interaction: discord.Interaction, button: ui.Button):
         await self.view_requests_callback(interaction)
     
@@ -66,7 +67,7 @@ class CoffeeChatMainView(ui.View):
     async def leaderboard_button(self, interaction: discord.Interaction, button: ui.Button):
         await self.leaderboard_callback(interaction)
     
-    @ui.button(label="Cancel My Request", style=discord.ButtonStyle.danger, emoji="❌")
+    @ui.button(label="Cancel My Request", style=discord.ButtonStyle.danger, emoji="⚫")
     async def cancel_button(self, interaction: discord.Interaction, button: ui.Button):
         await self.cancel_callback(interaction)
 
@@ -100,10 +101,25 @@ class RequestSelect(ui.Select):
             if len(topic) > 50:
                 topic = topic[:47] + "..."
             
+            # Create description that includes the request description if available
+            user_info = f"From {req['requester_name']} in {req['server_name']}"
+            description = req.get('description', '')
+            
+            # Truncate description if needed
+            if description and len(description) > 50:
+                description = description[:47] + "..."
+                
+            # Combine user info and description if description exists
+            display_description = f"{user_info} - {description}" if description else user_info
+            
+            # Ensure the description isn't too long for Discord's limits
+            if len(display_description) > 100:
+                display_description = display_description[:97] + "..."
+            
             options.append(
                 discord.SelectOption(
                     label=f"{topic}",
-                    description=f"From {req['requester_name']} in {req['server_name']}",
+                    description=display_description,
                     value=str(req['request_id'])
                 )
             )
@@ -117,6 +133,18 @@ class RequestSelect(ui.Select):
     
     async def callback(self, interaction: discord.Interaction):
         request_id = int(self.values[0])
+        
+        # Find the selected request
+        selected_request = next((r for r in self.requests if r['request_id'] == request_id), None)
+        
+        # Check if user is trying to accept their own request
+        if selected_request and selected_request['user_id'] == interaction.user.id:
+            await interaction.response.send_message(
+                "You cannot accept your own coffee chat request.",
+                ephemeral=True
+            )
+            return
+            
         await self.accept_callback(interaction, request_id)
 
 class ChatView(ui.View):
@@ -138,9 +166,50 @@ def create_request_embed(request, user):
         color=discord.Color.blue()
     )
     
-    embed.add_field(name="Requested by", value=user.display_name, inline=True)
+    embed.add_field(name="Requested by", value=f"{user.display_name} ({user.name})", inline=True)
     embed.add_field(name="Status", value="Pending", inline=True)
     embed.set_footer(text=f"Request ID: {request['request_id']}")
+    embed.timestamp = discord.utils.utcnow()
+    
+    return embed
+
+def create_completed_request_embed(request_id, chat_data, responder_name):
+    """Create an embed for a completed chat request."""
+    embed = discord.Embed(
+        title=f"Completed Coffee Chat: {chat_data['topic']}",
+        description=chat_data['description'] if chat_data.get('description') else "No additional details provided.",
+        color=discord.Color.green()
+    )
+    
+    # Calculate duration in minutes
+    try:
+        # Handle string ISO format or datetime objects
+        if isinstance(chat_data['started_at'], str):
+            start_time = datetime.fromisoformat(chat_data['started_at'])
+        else:
+            start_time = chat_data['started_at']
+            
+        if isinstance(chat_data['ended_at'], str):
+            end_time = datetime.fromisoformat(chat_data['ended_at'])
+        else:
+            end_time = chat_data['ended_at']
+            
+        duration = max(1, int((end_time - start_time).total_seconds() / 60))
+    except (ValueError, TypeError, KeyError) as e:
+        # Fallback to a default duration if there's an error
+        duration = chat_data.get('duration', 1)
+        start_time = datetime.utcnow()
+        end_time = datetime.utcnow()
+    
+    # We're now passing in the full formatted name from message_handler.py
+    embed.add_field(name="Requested by", value=chat_data['user1_name'], inline=True)
+    embed.add_field(name="Accepted by", value=responder_name, inline=True)
+    embed.add_field(name="Duration", value=f"{duration} minutes", inline=True)
+    embed.add_field(name="Status", value="Completed ✅", inline=True)
+    embed.add_field(name="Ended", value=f"<t:{int(end_time.timestamp())}:R>", inline=True)
+    
+    # Only include the chat_id in the footer since request_id is redundant
+    embed.set_footer(text=f"Chat ID: {chat_data['chat_id']}")
     embed.timestamp = discord.utils.utcnow()
     
     return embed
@@ -154,7 +223,6 @@ def create_stats_embed(user, stats):
     
     embed.add_field(name="Total Chats", value=stats['total_chats'], inline=True)
     embed.add_field(name="Total Chat Time", value=f"{stats['total_time']} minutes", inline=True)
-    embed.add_field(name="Average Rating", value=f"{stats['rating']:.1f}/5.0" if stats['rating'] else "No ratings yet", inline=True)
     
     embed.set_thumbnail(url=user.display_avatar.url)
     embed.set_footer(text=f"User ID: {user.id}")

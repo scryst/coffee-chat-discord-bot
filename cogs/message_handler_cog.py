@@ -1,7 +1,13 @@
 import discord
 from discord.ext import commands
 import logging
-from ..utils import MessageHandler
+import sys
+import os
+
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils import MessageHandler
 
 logger = logging.getLogger('coffee_bot.message_handler_cog')
 
@@ -22,6 +28,9 @@ class MessageHandlerCog(commands.Cog):
         # Only process direct messages
         if not isinstance(message.channel, discord.DMChannel):
             return
+        
+        # Process the message
+        await self.bot.process_commands(message)
         
         # Check if user is in an active chat
         is_in_chat = await self.bot.message_handler.is_in_active_chat(message.author.id)

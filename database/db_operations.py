@@ -48,15 +48,11 @@ async def get_user_stats(user_id):
             SELECT 
                 u.user_id, 
                 u.username, 
-                u.total_chats, 
-                u.total_time, 
-                u.rating,
-                COUNT(DISTINCT ch.chat_id) as completed_chats
+                COALESCE(u.total_chats, 0) as total_chats, 
+                COALESCE(u.total_time, 0) as total_time, 
+                COALESCE(u.rating, 0) as rating
             FROM users u
-            LEFT JOIN active_chats ac ON (u.user_id = ac.user1_id OR u.user_id = ac.user2_id)
-            LEFT JOIN chat_history ch ON ac.chat_id = ch.chat_id
             WHERE u.user_id = ?
-            GROUP BY u.user_id
             """,
             (user_id,)
         )
@@ -123,6 +119,20 @@ async def create_chat_request(user_id, server_id, topic, description):
         request = await cursor.fetchone()
         return dict(request)
 
+async def update_request_message_info(request_id, message_id, channel_id):
+    """Update the message ID and channel ID for a request."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE chat_requests 
+            SET message_id = ?, channel_id = ? 
+            WHERE request_id = ?
+            """,
+            (message_id, channel_id, request_id)
+        )
+        await db.commit()
+        return True
+
 async def get_pending_requests(exclude_user_id=None):
     """Get all pending chat requests, optionally excluding a user's own requests."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -143,6 +153,9 @@ async def get_pending_requests(exclude_user_id=None):
         if exclude_user_id:
             query += " AND cr.user_id != ?"
             params.append(exclude_user_id)
+        
+        # Add order by to get newest requests first
+        query += " ORDER BY cr.created_at DESC"
         
         cursor = await db.execute(query, params)
         requests = await cursor.fetchall()
@@ -182,43 +195,79 @@ async def create_chat(request_id, user1_id, user2_id):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         
-        # Update request status
-        await db.execute(
-            "UPDATE chat_requests SET status = 'accepted' WHERE request_id = ?",
-            (request_id,)
-        )
-        
-        # Create active chat
-        cursor = await db.execute(
-            """
-            INSERT INTO active_chats 
-                (request_id, user1_id, user2_id) 
-            VALUES (?, ?, ?)
-            """,
-            (request_id, user1_id, user2_id)
-        )
-        chat_id = cursor.lastrowid
-        await db.commit()
-        
-        # Get the created chat
-        cursor = await db.execute(
-            """
-            SELECT 
-                ac.*, 
-                cr.topic, 
-                cr.description,
-                u1.username as user1_name,
-                u2.username as user2_name
-            FROM active_chats ac
-            JOIN chat_requests cr ON ac.request_id = cr.request_id
-            JOIN users u1 ON ac.user1_id = u1.user_id
-            JOIN users u2 ON ac.user2_id = u2.user_id
-            WHERE ac.chat_id = ?
-            """, 
-            (chat_id,)
-        )
-        chat = await cursor.fetchone()
-        return dict(chat)
+        try:
+            # Update request status
+            await db.execute(
+                "UPDATE chat_requests SET status = 'accepted' WHERE request_id = ?",
+                (request_id,)
+            )
+            
+            # Create active chat
+            cursor = await db.execute(
+                """
+                INSERT INTO active_chats 
+                    (request_id, user1_id, user2_id) 
+                VALUES (?, ?, ?)
+                """,
+                (request_id, user1_id, user2_id)
+            )
+            chat_id = cursor.lastrowid
+            await db.commit()
+            
+            # Get the created chat
+            cursor = await db.execute(
+                """
+                SELECT 
+                    ac.*, 
+                    cr.topic, 
+                    cr.description,
+                    u1.username as user1_name,
+                    u2.username as user2_name
+                FROM active_chats ac
+                JOIN chat_requests cr ON ac.request_id = cr.request_id
+                JOIN users u1 ON ac.user1_id = u1.user_id
+                JOIN users u2 ON ac.user2_id = u2.user_id
+                WHERE ac.chat_id = ?
+                """, 
+                (chat_id,)
+            )
+            chat = await cursor.fetchone()
+            
+            if chat is None:
+                # If we couldn't retrieve the chat details, create a basic chat dict
+                logging.warning(f"Could not retrieve chat details for chat_id {chat_id}")
+                return {
+                    'chat_id': chat_id,
+                    'request_id': request_id,
+                    'user1_id': user1_id,
+                    'user2_id': user2_id,
+                    'status': 'active',
+                    'created_at': datetime.now().isoformat(),
+                    'topic': 'Unknown Topic',
+                    'description': 'No description available',
+                    'user1_name': 'User 1',
+                    'user2_name': 'User 2'
+                }
+            
+            return dict(chat)
+            
+        except Exception as e:
+            logging.error(f"Error creating chat: {e}")
+            # Rollback in case of error
+            await db.rollback()
+            # Return a basic error chat dict
+            return {
+                'chat_id': -1,
+                'request_id': request_id,
+                'user1_id': user1_id,
+                'user2_id': user2_id,
+                'status': 'error',
+                'created_at': datetime.now().isoformat(),
+                'topic': 'Error',
+                'description': f'Error creating chat: {str(e)}',
+                'user1_name': 'User 1',
+                'user2_name': 'User 2'
+            }
 
 async def get_active_chat(user_id):
     """Get a user's active chat if any."""
@@ -316,11 +365,11 @@ async def get_leaderboard(limit=10):
             SELECT 
                 user_id, 
                 username, 
-                total_chats, 
-                total_time, 
-                rating
+                COALESCE(total_chats, 0) as total_chats, 
+                COALESCE(total_time, 0) as total_time, 
+                COALESCE(rating, 0) as rating
             FROM users
-            WHERE total_chats > 0
+            WHERE COALESCE(total_chats, 0) > 0
             ORDER BY total_chats DESC, total_time DESC
             LIMIT ?
             """,
@@ -328,3 +377,42 @@ async def get_leaderboard(limit=10):
         )
         leaderboard = await cursor.fetchall()
         return [dict(entry) for entry in leaderboard]
+
+async def get_chat_details(chat_id):
+    """Get detailed information about a chat for updating the request message."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        
+        # Get chat data including request info and user names
+        cursor = await db.execute(
+            """
+            SELECT 
+                ac.*,
+                cr.*,
+                ch.ended_at,
+                u1.username as user1_name,
+                u2.username as user2_name,
+                s.server_name as server_name
+            FROM active_chats ac
+            JOIN chat_requests cr ON ac.request_id = cr.request_id
+            JOIN chat_history ch ON ac.chat_id = ch.chat_id
+            JOIN users u1 ON ac.user1_id = u1.user_id
+            JOIN users u2 ON ac.user2_id = u2.user_id
+            JOIN servers s ON cr.server_id = s.server_id
+            WHERE ac.chat_id = ?
+            """,
+            (chat_id,)
+        )
+        
+        chat_data = await cursor.fetchone()
+        if not chat_data:
+            return None
+            
+        # Convert to dict
+        chat_dict = dict(chat_data)
+        
+        # Add requester name for convenience
+        chat_dict['requester_name'] = chat_dict['user1_name']
+        chat_dict['responder_name'] = chat_dict['user2_name']
+        
+        return chat_dict
