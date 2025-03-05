@@ -1,3 +1,6 @@
-run = "python3 -m pip install --user -r requirements.txt && python3 bot.py"
+run = "python3 -m pip install --user discord.py aiosqlite python-dotenv flask PyNaCl requests && PYTHONPATH=$PYTHONPATH:$(python3 -m site --user-site) python3 bot.py"
 language = "python3"
 entrypoint = "bot.py"
+
+[env]
+PYTHONPATH = "${PYTHONPATH}:${HOME}/.local/lib/python3.10/site-packages"
