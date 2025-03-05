@@ -117,11 +117,21 @@ class CoffeeCommands(commands.Cog):
         
         # Override the view_requests_button method to handle the new button
         async def view_requests_button_callback(self, interaction):
-            await self.view_requests_callback(interaction)
+            try:
+                await interaction.response.defer(ephemeral=True)
+                await self.view_requests_callback(interaction)
+            except discord.errors.InteractionResponded:
+                # If the interaction has already been responded to, use followup instead
+                await self.view_requests_callback(interaction)
             
         # Add end_chat_button callback
         async def end_chat_button_callback(self, interaction):
-            await self.end_chat_callback(interaction)
+            try:
+                await interaction.response.defer(ephemeral=True)
+                await self.end_chat_callback(interaction)
+            except discord.errors.InteractionResponded:
+                # If the interaction has already been responded to, use followup instead
+                await self.end_chat_callback(interaction)
     
     @app_commands.command(
         name="coffee", 
@@ -320,7 +330,10 @@ class CoffeeCommands(commands.Cog):
                 description="There are no pending coffee chat requests at the moment. Why not create one?",
                 color=discord.Color.blue()
             )
-            await interaction.response.edit_message(embed=embed)
+            try:
+                await interaction.response.edit_message(embed=embed)
+            except discord.errors.InteractionResponded:
+                await interaction.followup.edit_message(interaction.message.id, embed=embed)
             return
         
         # Create embed with request info
@@ -334,7 +347,10 @@ class CoffeeCommands(commands.Cog):
         view = RequestListView(requests, self.handle_accept_request)
         
         # Edit the original message
-        await interaction.response.edit_message(embed=embed, view=view)
+        try:
+            await interaction.response.edit_message(embed=embed, view=view)
+        except discord.errors.InteractionResponded:
+            await interaction.followup.edit_message(interaction.message.id, embed=embed, view=view)
     
     async def handle_accept_request(self, interaction: discord.Interaction, request_id):
         """Handle a user accepting a coffee chat request."""
