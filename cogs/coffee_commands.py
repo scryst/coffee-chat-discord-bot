@@ -30,6 +30,8 @@ from database import (
     get_leaderboard,
     get_active_chat,
     end_chat,
+    update_request_message_info,
+    get_request_by_id,
     update_request_message_info
 )
 
@@ -336,134 +338,124 @@ class CoffeeCommands(commands.Cog):
     
     async def handle_accept_request(self, interaction: discord.Interaction, request_id):
         """Handle a user accepting a coffee chat request."""
-        # Get the request details
-        requests = await get_pending_requests()
-        request = next((r for r in requests if r['request_id'] == request_id), None)
+        # Immediately defer the response to prevent timeout
+        await interaction.response.defer(ephemeral=True)
         
+        # Get the request details
+        request = await get_request_by_id(request_id)
         if not request:
-            await interaction.response.send_message(
-                "This request is no longer available or has been cancelled.",
-                ephemeral=True
-            )
+            await interaction.followup.send("This request is no longer available.", ephemeral=True)
             return
         
         # Check if user is trying to accept their own request
         if request['user_id'] == interaction.user.id:
-            await interaction.response.send_message(
-                "You cannot accept your own coffee chat request.",
-                ephemeral=True
-            )
+            await interaction.followup.send("You cannot accept your own request.", ephemeral=True)
             return
         
         # Check if user is already in a chat
-        user_in_chat = await self.bot.message_handler.is_in_active_chat(interaction.user.id)
-        if user_in_chat:
-            await interaction.response.send_message(
-                "You are already in an active coffee chat. Please finish your current chat before accepting a new one.",
+        if await self.bot.message_handler.is_in_active_chat(interaction.user.id):
+            await interaction.followup.send(
+                "You are already in an active coffee chat. Please end your current chat before accepting a new one.",
                 ephemeral=True
             )
             return
         
-        # Check if the user has their own pending request and cancel it
-        user_request = await get_user_request(interaction.user.id)
-        if user_request:
-            await cancel_request(user_request['request_id'])
-            # Notify the user that their request was automatically cancelled
-            await interaction.user.send(
-                embed=discord.Embed(
-                    title="Your Request Automatically Cancelled",
-                    description=f"Your coffee chat request '{user_request['topic']}' was automatically cancelled because you accepted another request.",
-                    color=discord.Color.blue()
-                )
-            )
-        
-        # Get user and server info
-        requester_id = request['user_id']
-        responder_id = interaction.user.id
-        
-        # Create the chat in the database
-        chat = await create_chat(request_id, requester_id, responder_id)
-        
-        if chat['status'] == 'error':
-            await interaction.response.send_message(
-                f"Error creating chat: {chat['description']}",
+        # Check if request is still pending
+        if request['status'] != 'pending':
+            await interaction.followup.send(
+                f"This request has already been {request['status']}.",
                 ephemeral=True
             )
             return
         
-        # Start the chat in the message handler
-        success = await self.bot.message_handler.start_chat(chat)
-        
-        if not success:
-            await interaction.response.send_message(
-                "Failed to start chat. Make sure you have DMs enabled.",
-                ephemeral=True
-            )
-            return
-        
-        # Update the original message to show "accepted" status
-        try:
-            # Get the original message
-            if 'message_id' in request and 'channel_id' in request:
-                channel = self.bot.get_channel(int(request['channel_id']))
-                if channel:
+        # Cancel any pending requests from the accepting user
+        existing_request = await get_user_request(interaction.user.id)
+        if existing_request:
+            await cancel_request(existing_request['request_id'])
+            
+            # Try to update the request message if it exists
+            try:
+                request_channel = self.bot.get_channel(int(existing_request['channel_id']))
+                if request_channel:
                     try:
-                        message = await channel.fetch_message(int(request['message_id']))
-                        if message:
-                            # Create accepted embed
-                            embed = discord.Embed(
-                                title=f"Coffee Chat In Progress: {request['topic']}",
-                                description=request['description'] if request['description'] else "No additional details provided.",
-                                color=discord.Color.gold()
+                        request_message = await request_channel.fetch_message(int(existing_request['message_id']))
+                        if request_message:
+                            cancelled_embed = discord.Embed(
+                                title="☕ Coffee Chat Request Cancelled",
+                                description=f"This request was automatically cancelled because {interaction.user.mention} accepted another coffee chat.",
+                                color=discord.Color.light_grey()
                             )
-                            
-                            # Get user objects for display names
-                            requester = await self.bot.fetch_user(requester_id)
-                            responder = await self.bot.fetch_user(responder_id)
-                            
-                            requester_name = f"{requester.display_name} ({requester.name})" if requester else request['requester_name']
-                            responder_name = f"{interaction.user.display_name} ({interaction.user.name})"
-                            
-                            embed.add_field(name="Requested by", value=requester_name, inline=True)
-                            embed.add_field(name="Accepted by", value=responder_name, inline=True)
-                            embed.add_field(name="Status", value="In Progress ⏳", inline=True)
-                            embed.set_footer(text=f"Chat ID: {chat['chat_id']}")
-                            embed.timestamp = discord.utils.utcnow()
-                            
-                            # Create a view with a "Currently Chatting" button
-                            class CurrentlyChattingView(discord.ui.View):
-                                def __init__(self):
-                                    super().__init__(timeout=None)
-                                
-                                @discord.ui.button(
-                                    label="Currently Chatting", 
-                                    style=discord.ButtonStyle.secondary, 
-                                    emoji="💬", 
-                                    disabled=True,
-                                    custom_id=f"chatting_{chat['chat_id']}"
-                                )
-                                async def chatting_button(self, button_interaction: discord.Interaction, button: discord.ui.Button):
-                                    pass
-                            
-                            # Update the message
-                            await message.edit(
-                                content=f"**{requester_name}** is having a coffee chat with **{responder_name}**!",
-                                embed=embed,
-                                view=CurrentlyChattingView()
+                            await request_message.edit(embed=cancelled_embed, view=None)
+                    except (discord.NotFound, discord.Forbidden):
+                        pass  # Message may have been deleted or bot lacks permissions
+            except Exception as e:
+                logger.error(f"Error updating cancelled request message: {e}")
+        
+        # Create the chat
+        requester_id = int(request['user_id'])
+        accepter_id = interaction.user.id
+        
+        chat_id = await create_chat(request_id, requester_id, accepter_id)
+        
+        # Update the request status
+        await update_request_message_info(request_id, 'status', 'accepted')
+        
+        # Get user objects
+        requester = self.bot.get_user(requester_id)
+        accepter = self.bot.get_user(accepter_id)
+        
+        if not requester or not accepter:
+            # Try to fetch users if not in cache
+            try:
+                if not requester:
+                    requester = await self.bot.fetch_user(requester_id)
+                if not accepter:
+                    accepter = await self.bot.fetch_user(accepter_id)
+            except discord.NotFound:
+                await interaction.followup.send(
+                    "Could not find one of the users for this chat. The request may be invalid.",
+                    ephemeral=True
+                )
+                return
+        
+        # Start the chat
+        success = await self.bot.message_handler.start_chat(chat_id, requester, accepter, request['topic'])
+        
+        if success:
+            # Send confirmation to the accepter
+            await interaction.followup.send(
+                f"You've accepted a coffee chat with {requester.name}! Check your DMs to start chatting.",
+                ephemeral=True
+            )
+            
+            # Update the request message
+            try:
+                request_channel = self.bot.get_channel(int(request['channel_id']))
+                if request_channel:
+                    try:
+                        request_message = await request_channel.fetch_message(int(request['message_id']))
+                        if request_message:
+                            accepted_embed = discord.Embed(
+                                title="☕ Coffee Chat In Progress",
+                                description=f"**Topic:** {request['topic']}\n\n"
+                                           f"**Requested by:** {requester.mention}\n"
+                                           f"**Accepted by:** {accepter.mention}\n"
+                                           f"**Started:** <t:{int(datetime.now().timestamp())}:R>",
+                                color=discord.Color.green()
                             )
-                    except Exception as e:
-                        logger.error(f"Error updating message: {e}")
-        except Exception as e:
-            logger.error(f"Error in handle_accept_request: {e}")
-        
-        # Confirm to the user
-        await interaction.response.send_message(
-            f"You've accepted the coffee chat request! Check your DMs to start chatting with {request['requester_name']}.",
-            ephemeral=True
-        )
-        
-        # Update bot status
-        await self.update_bot_status()
+                            await request_message.edit(embed=accepted_embed, view=None)
+                    except (discord.NotFound, discord.Forbidden):
+                        pass  # Message may have been deleted or bot lacks permissions
+            except Exception as e:
+                logger.error(f"Error updating accepted request message: {e}")
+            
+            # Update bot status
+            await self.update_bot_status()
+        else:
+            await interaction.followup.send(
+                "There was an error starting the coffee chat. Please try again later.",
+                ephemeral=True
+            )
     
     async def handle_stats(self, interaction: discord.Interaction):
         """Handle a user clicking the My Stats button."""
