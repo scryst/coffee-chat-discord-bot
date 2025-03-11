@@ -6,10 +6,37 @@ import logging
 import sys
 
 # Add the current directory to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+# Print debugging information
+print(f"Current directory: {current_dir}")
+print(f"Directory contents: {os.listdir(current_dir)}")
+print(f"Python path: {sys.path}")
 
 # Import local modules with absolute imports
-from database.db_setup import initialize_database
+try:
+    from database.db_setup import initialize_database
+    print("Successfully imported database.db_setup")
+except ImportError as e:
+    print(f"Error importing database: {e}")
+    print(f"Attempting alternative import approach...")
+    # Try a different approach if the first one fails
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("db_setup", os.path.join(current_dir, "database", "db_setup.py"))
+        if spec and spec.loader:
+            db_setup = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(db_setup)
+            initialize_database = db_setup.initialize_database
+            print("Alternative import successful")
+        else:
+            print(f"Could not find database/db_setup.py file")
+            sys.exit(1)
+    except Exception as e2:
+        print(f"Alternative import failed: {e2}")
+        sys.exit(1)
+
 from web_server import keep_alive
 from utils.status_updater import StatusUpdater
 
