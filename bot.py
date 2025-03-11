@@ -6,9 +6,10 @@ import logging
 import sys
 
 # Add the current directory to the path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from database import initialize_database
+# Import local modules with absolute imports
+from database.db_setup import initialize_database
 from web_server import keep_alive
 from utils.status_updater import StatusUpdater
 
